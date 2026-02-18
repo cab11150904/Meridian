@@ -793,6 +793,11 @@
     letter-spacing: 0.05em;
   }
 
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
   @keyframes toastIn {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
@@ -923,7 +928,12 @@
     <div class="panel">
       <div class="panel-header">
         <div class="panel-title"><span class="dot"></span>Today's Calendar</div>
-        <button class="secondary" onclick="toggleAddEvent()" id="add-event-btn">+ Add</button>
+        <div style="display:flex;gap:0.4rem;align-items:center;">
+          <button id="manual-refresh-btn" onclick="manualRefresh()" title="Refresh calendar" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);width:26px;height:26px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;flex-shrink:0;padding:0;" onmouseover="this.style.borderColor='var(--teal)';this.style.color='var(--teal-light)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">
+            <svg id="refresh-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+          <button class="secondary" onclick="toggleAddEvent()" id="add-event-btn">+ Add</button>
+        </div>
       </div>
 
       <!-- Google Cal connect -->
@@ -1411,6 +1421,21 @@ function setGcalConnectedUI() {
   };
   updateLastSyncUI();
   resetCountdown();
+}
+
+function manualRefresh() {
+  if (!state.gcalConnected) { showToast('Calendar not connected.'); return; }
+  const icon = document.getElementById('refresh-icon');
+  const btn = document.getElementById('manual-refresh-btn');
+  if (btn) btn.style.pointerEvents = 'none';
+  if (icon) icon.style.animation = 'spin 0.7s linear infinite';
+  fetchCalendarEvents()
+    .then(n => { showToast(`Refreshed — ${n} events today.`); resetCountdown(); })
+    .catch(e => showToast('Refresh failed: ' + (e.message || e)))
+    .finally(() => {
+      if (icon) icon.style.animation = '';
+      if (btn) btn.style.pointerEvents = '';
+    });
 }
 
 function resetCountdown() {
