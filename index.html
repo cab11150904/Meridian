@@ -1284,12 +1284,17 @@ async function initGapiClient() {
 
   console.log('[Meridian] Initializing gapi client...');
   try {
-    await gapi.client.init({
-      apiKey: state.gcalApiKey,
+    // API key is optional when using OAuth — only include if the user provided one
+    const initConfig = {
       discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
-    });
+    };
+    if (state.gcalApiKey) initConfig.apiKey = state.gcalApiKey;
+    await gapi.client.init(initConfig);
   } catch(e) {
     const msg = errStr(e);
+    if (msg.includes('API key not valid') || msg.includes('API_KEY_INVALID') || msg.includes('INVALID_ARGUMENT')) {
+      throw new Error('Invalid API Key. You can clear the API Key field in Settings — it is optional when using OAuth. Only your OAuth Client ID is required.');
+    }
     if (msg.includes('idpiframe') || msg.includes('Not a valid origin')) {
       throw new Error('Origin not authorized. Add "' + location.origin + '" to your OAuth client\'s allowed origins in Google Cloud Console.');
     }
