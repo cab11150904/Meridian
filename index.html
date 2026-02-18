@@ -553,6 +553,44 @@
     to { opacity: 1; transform: translateY(0); }
   }
 
+  .schedule-block {
+    cursor: default;
+    user-select: none;
+  }
+
+  .drag-handle {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    opacity: 0;
+    transition: opacity 0.15s;
+    color: var(--text-dim);
+    font-size: 0.65rem;
+    letter-spacing: -1px;
+    padding-bottom: 1px;
+  }
+
+  .schedule-block:hover .drag-handle { opacity: 1; }
+  .schedule-block:hover { padding-left: 1.75rem; }
+
+  .schedule-block.dragging {
+    opacity: 0.35;
+    border-style: dashed;
+  }
+
+  .schedule-block.drag-over {
+    border-color: var(--amber);
+    background: rgba(201,147,58,0.06);
+    transform: translateY(-2px);
+  }
+
+  .schedule-block.drag-over.break { border-color: var(--teal); background: rgba(61,140,128,0.08); }
+  .schedule-block.drag-over.personal { border-color: #7e6aaf; background: rgba(126,106,175,0.06); }
+
   .schedule-block.focus { border-left: 3px solid var(--amber); }
   .schedule-block.break { border-left: 3px solid var(--teal); background: rgba(61,140,128,0.05); }
   .schedule-block.personal { border-left: 3px solid #7e6aaf; }
@@ -1739,29 +1777,145 @@ Each object must have these exact fields:
   }
 }
 
-function renderSchedule(blocks) {
-  const typeLabels = {
-    focus: 'Deep Focus',
-    break: 'Break',
-    personal: 'Personal',
-    admin: 'Admin',
-    meeting: 'Meeting'
-  };
+// ── Schedule state ─────────────────────────────────────────────────────────
+let currentSchedule = [];
+let dragSrcIndex = null;
 
+const typeLabels = {
+  focus: 'Deep Focus', break: 'Break', personal: 'Personal',
+  admin: 'Admin', meeting: 'Meeting'
+};
+
+// ── Time / duration parsing ────────────────────────────────────────────────
+function parseTimeToMinutes(timeStr) {
+  if (!timeStr) return 0;
+  const m = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return 0;
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2]);
+  const ampm = m[3].toUpperCase();
+  if (ampm === 'PM' && h !== 12) h += 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+function minutesToTimeStr(totalMins) {
+  totalMins = ((totalMins % 1440) + 1440) % 1440;
+  const h24 = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  const ampm = h24 < 12 ? 'AM' : 'PM';
+  let h = h24 % 12;
+  if (h === 0) h = 12;
+  return `${h}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+function parseDurationToMinutes(durStr) {
+  if (!durStr) return 30;
+  let total = 0;
+  const hrMatch = durStr.match(/(\d+(?:\.\d+)?)\s*h(?:r|rs|our|ours)?/i);
+  const minMatch = durStr.match(/(\d+)\s*m(?:in|ins|inute|inutes)?/i);
+  if (hrMatch) total += Math.round(parseFloat(hrMatch[1]) * 60);
+  if (minMatch) total += parseInt(minMatch[1]);
+  return total || 30;
+}
+
+// ── Recalculate times after reorder ───────────────────────────────────────
+function recalcTimes() {
+  if (!currentSchedule.length) return;
+  let cursor = parseTimeToMinutes(currentSchedule[0].time);
+  if (cursor === 0) cursor = parseTimeToMinutes('9:00 AM');
+  currentSchedule.forEach((b, i) => {
+    b.time = minutesToTimeStr(cursor);
+    const dur = parseDurationToMinutes(b.duration);
+    cursor += dur;
+  });
+}
+
+// ── Drag-and-drop handlers ────────────────────────────────────────────────
+function onDragStart(e, idx) {
+  dragSrcIndex = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', idx);
+  // Slight delay so the dragging class applies after the browser snapshots the element
+  setTimeout(() => {
+    const el = document.querySelector(`[data-block-idx="${idx}"]`);
+    if (el) el.classList.add('dragging');
+  }, 0);
+}
+
+function onDragEnd(e, idx) {
+  document.querySelectorAll('.schedule-block').forEach(el => {
+    el.classList.remove('dragging', 'drag-over');
+  });
+}
+
+function onDragOver(e, idx) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.schedule-block').forEach(el => el.classList.remove('drag-over'));
+  const el = document.querySelector(`[data-block-idx="${idx}"]`);
+  if (el && idx !== dragSrcIndex) el.classList.add('drag-over');
+}
+
+function onDragLeave(e, idx) {
+  const el = document.querySelector(`[data-block-idx="${idx}"]`);
+  if (el) el.classList.remove('drag-over');
+}
+
+function onDrop(e, targetIdx) {
+  e.preventDefault();
+  if (dragSrcIndex === null || dragSrcIndex === targetIdx) return;
+  // Reorder
+  const moved = currentSchedule.splice(dragSrcIndex, 1)[0];
+  currentSchedule.splice(targetIdx, 0, moved);
+  recalcTimes();
+  renderScheduleBlocks(false); // no intro animation on reorder
+  dragSrcIndex = null;
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function renderSchedule(blocks) {
+  currentSchedule = blocks.map(b => ({ ...b }));
+  renderScheduleBlocks(true);
+  showToast('Your schedule is ready. Drag blocks to reorder.');
+}
+
+function renderScheduleBlocks(animate) {
   const output = document.getElementById('schedule-output');
-  output.innerHTML = blocks.map((b, i) => `
-    <div class="schedule-block ${b.type || 'admin'}" style="animation-delay:${i * 60}ms">
+  output.innerHTML = '';
+  currentSchedule.forEach((b, i) => {
+    const el = document.createElement('div');
+    el.className = `schedule-block ${b.type || 'admin'}`;
+    el.setAttribute('draggable', 'true');
+    el.setAttribute('data-block-idx', i);
+    if (animate) el.style.animationDelay = `${i * 60}ms`;
+
+    el.innerHTML = `
+      <div class="drag-handle" title="Drag to reorder">⠿</div>
       <div class="block-time">${escapeHtml(b.time || '')}${b.duration ? ' · ' + escapeHtml(b.duration) : ''}</div>
       <div class="block-title">${escapeHtml(b.title || '')}</div>
       ${b.description ? `<div class="block-desc">${escapeHtml(b.description)}</div>` : ''}
       <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
         <span class="block-tag">${typeLabels[b.type] || b.type || 'Task'}</span>
         ${b.goal_ref ? `<span style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);margin-top:0.4rem;">↳ ${escapeHtml(b.goal_ref)}</span>` : ''}
-      </div>
-    </div>
-  `).join('');
+      </div>`;
 
-  showToast('Your schedule is ready.');
+    el.addEventListener('dragstart', e => onDragStart(e, i));
+    el.addEventListener('dragend',   e => onDragEnd(e, i));
+    el.addEventListener('dragover',  e => onDragOver(e, i));
+    el.addEventListener('dragleave', e => onDragLeave(e, i));
+    el.addEventListener('drop',      e => onDrop(e, i));
+
+    // Prevent drag when clicking the content (only drag handle triggers it)
+    const handle = el.querySelector('.drag-handle');
+    el.addEventListener('mousedown', e => {
+      if (!e.target.closest('.drag-handle')) el.setAttribute('draggable', 'false');
+    });
+    el.addEventListener('mouseup', () => el.setAttribute('draggable', 'true'));
+    handle.addEventListener('mousedown', () => el.setAttribute('draggable', 'true'));
+
+    output.appendChild(el);
+  });
 }
 
 // ──────────────────────────────────────────────
