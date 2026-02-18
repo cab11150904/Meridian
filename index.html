@@ -1306,8 +1306,8 @@ async function initGapiClient() {
 }
 
 async function connectGoogleCalendar() {
-  if (!state.gcalClientId || !state.gcalApiKey) {
-    showToast('No credentials. Open Settings and add your Google Client ID and API Key.');
+  if (!state.gcalClientId) {
+    showToast('No OAuth Client ID found. Open Settings and add your Google OAuth Client ID.');
     return;
   }
 
