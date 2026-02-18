@@ -1027,7 +1027,9 @@ let state = {
   workGoals: [],
   personalGoals: [],
   events: [],
-  gcalConnected: false
+  gcalConnected: false,
+  gcalToken: null,
+  gcalTokenExpiry: 0
 };
 
 // ──────────────────────────────────────────────
@@ -1041,6 +1043,9 @@ function init() {
       state = { ...state, ...parsed };
     } catch(e) {}
   }
+
+  // Reset live connection state — will be re-established by silentReconnect
+  state.gcalConnected = false;
 
   if (state.apiKey) {
     showApp();
@@ -1082,6 +1087,10 @@ function showApp() {
   renderGoals();
   renderEvents();
   updateStats();
+  // If we have a saved token and Calendar credentials, try to silently reconnect
+  if (state.gcalClientId && state.gcalToken) {
+    silentReconnect();
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -1247,6 +1256,162 @@ function updateStats() {
 // ──────────────────────────────────────────────
 let tokenClient = null;
 let gapiInitialized = false;
+let autoRefreshTimer = null;
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;   // fetch new events every 5 min
+const TOKEN_REFRESH_BUFFER = 5 * 60 * 1000;   // renew token 5 min before expiry
+
+// ── Silent reconnect on page load ──────────────────
+async function silentReconnect() {
+  try {
+    await loadScript('https://apis.google.com/js/api.js');
+    await loadScript('https://accounts.google.com/gsi/client');
+    if (!gapiInitialized) await initGapiClient();
+
+    // Restore saved token onto gapi.client
+    gapi.client.setToken({ access_token: state.gcalToken });
+
+    // Check if token is still valid (with buffer)
+    if (state.gcalTokenExpiry - Date.now() > TOKEN_REFRESH_BUFFER) {
+      await fetchCalendarEvents();
+      setGcalConnectedUI();
+      scheduleTokenRenewal();
+      startAutoRefresh();
+    } else {
+      // Token expired — get a fresh one silently (no popup if previously consented)
+      await silentTokenRenew();
+    }
+  } catch(e) {
+    console.warn('[Meridian] Silent reconnect failed:', e.message || e);
+    // Don't show an error — just leave the connect button available
+  }
+}
+
+// ── Silent token renewal (no consent prompt) ───────
+function silentTokenRenew() {
+  return new Promise((resolve, reject) => {
+    if (!tokenClient) {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: state.gcalClientId,
+        scope: 'https://www.googleapis.com/auth/calendar.readonly',
+        callback: async (resp) => {
+          if (resp.error) { reject(new Error(resp.error)); return; }
+          await onTokenReceived(resp);
+          resolve();
+        },
+        error_callback: (e) => reject(new Error(errStr(e))),
+      });
+    }
+    // prompt: '' means silent if previously consented, popup if not
+    tokenClient.requestAccessToken({ prompt: '' });
+  });
+}
+
+// ── Schedule token renewal before expiry ───────────
+function scheduleTokenRenewal() {
+  const msUntilRenew = (state.gcalTokenExpiry - Date.now()) - TOKEN_REFRESH_BUFFER;
+  if (msUntilRenew > 0) {
+    setTimeout(() => {
+      console.log('[Meridian] Proactively renewing OAuth token...');
+      silentTokenRenew().catch(e => console.warn('[Meridian] Token renewal failed:', e));
+    }, msUntilRenew);
+  }
+}
+
+// ── Auto-refresh calendar events ───────────────────
+function startAutoRefresh() {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(async () => {
+    if (!state.gcalConnected) return;
+    console.log('[Meridian] Auto-refreshing calendar events...');
+    try {
+      // Renew token first if close to expiry
+      if (state.gcalTokenExpiry - Date.now() < TOKEN_REFRESH_BUFFER) {
+        await silentTokenRenew();
+      }
+      await fetchCalendarEvents();
+      updateLastSyncUI();
+    } catch(e) {
+      console.warn('[Meridian] Auto-refresh failed:', e);
+    }
+  }, REFRESH_INTERVAL_MS);
+  console.log('[Meridian] Auto-refresh started (every 5 min).');
+}
+
+// ── Shared: store token + expiry ───────────────────
+async function onTokenReceived(resp) {
+  const expiresIn = parseInt(resp.expires_in || 3600);
+  state.gcalToken = resp.access_token;
+  state.gcalTokenExpiry = Date.now() + expiresIn * 1000;
+  gapi.client.setToken({ access_token: resp.access_token });
+  saveState();
+  await fetchCalendarEvents();
+  setGcalConnectedUI();
+  scheduleTokenRenewal();
+  startAutoRefresh();
+}
+
+// ── Fetch today's events (extracted for reuse) ─────
+async function fetchCalendarEvents() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const response = await gapi.client.calendar.events.list({
+    calendarId: 'primary',
+    timeMin: today.toISOString(),
+    timeMax: tomorrow.toISOString(),
+    singleEvents: true,
+    orderBy: 'startTime',
+  });
+
+  const items = response.result.items || [];
+  state.events = state.events.filter(e => e.source !== 'gcal');
+
+  items.forEach(item => {
+    const startDt = item.start.dateTime || item.start.date;
+    const endDt = item.end?.dateTime || item.end?.date;
+    const fmt = (dt) => {
+      if (!dt) return '';
+      const d = new Date(dt);
+      if (isNaN(d)) return dt;
+      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    };
+    state.events.push({
+      title: item.summary || 'Untitled event',
+      start: fmt(startDt),
+      end: fmt(endDt),
+      type: 'work',
+      notes: item.description || '',
+      source: 'gcal'
+    });
+  });
+
+  saveState();
+  renderEvents();
+  updateStats();
+  return items.length;
+}
+
+// ── Update button to connected state ───────────────
+function setGcalConnectedUI(count) {
+  state.gcalConnected = true;
+  const btn = document.getElementById('gcal-btn');
+  btn.classList.add('connected');
+  btn.style.pointerEvents = '';
+  btn.onclick = () => {
+    // Clicking while connected forces a manual refresh
+    fetchCalendarEvents().then(n => showToast(`Refreshed — ${n} events today.`)).catch(() => {});
+  };
+  updateLastSyncUI();
+}
+
+function updateLastSyncUI() {
+  const now = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const btn = document.getElementById('gcal-btn');
+  const count = state.events.filter(e => e.source === 'gcal').length;
+  btn.innerHTML = `<span class="status-dot"></span> ${count} event${count !== 1 ? 's' : ''} · synced ${now} <span style="opacity:0.5;margin-left:0.5rem;font-size:0.55rem;">click to refresh</span>`;
+}
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -1350,10 +1515,12 @@ async function connectGoogleCalendar() {
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: state.gcalClientId,
       scope: 'https://www.googleapis.com/auth/calendar.readonly',
-      callback: handleGCalTokenResponse,
-      error_callback: (e) => {
-        showGcalError('OAuth error: ' + errStr(e));
+      callback: async (resp) => {
+        if (resp.error) { showGcalError('OAuth error: ' + errStr(resp)); return; }
+        try { await onTokenReceived(resp); showToast('Google Calendar connected!'); }
+        catch(e) { showGcalError('Failed to fetch events: ' + errStr(e)); }
       },
+      error_callback: (e) => showGcalError('OAuth error: ' + errStr(e)),
     });
     tokenClient.requestAccessToken({ prompt: 'consent' });
   } catch(e) {
@@ -1390,65 +1557,7 @@ function resetGcalBtn() {
   `;
 }
 
-async function handleGCalTokenResponse(resp) {
-  if (resp.error) {
-    showToast('Google Calendar auth failed: ' + resp.error);
-    return;
-  }
 
-  try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const response = await gapi.client.calendar.events.list({
-      calendarId: 'primary',
-      timeMin: today.toISOString(),
-      timeMax: tomorrow.toISOString(),
-      singleEvents: true,
-      orderBy: 'startTime',
-    });
-
-    const items = response.result.items || [];
-
-    // Remove existing gcal events
-    state.events = state.events.filter(e => e.source !== 'gcal');
-
-    items.forEach(item => {
-      const startDt = item.start.dateTime || item.start.date;
-      const endDt = item.end?.dateTime || item.end?.date;
-
-      const fmt = (dt) => {
-        if (!dt) return '';
-        const d = new Date(dt);
-        if (isNaN(d)) return dt;
-        return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-      };
-
-      state.events.push({
-        title: item.summary || 'Untitled event',
-        start: fmt(startDt),
-        end: fmt(endDt),
-        type: 'work',
-        notes: item.description || '',
-        source: 'gcal'
-      });
-    });
-
-    saveState();
-    renderEvents();
-    updateStats();
-
-    state.gcalConnected = true;
-    const btn = document.getElementById('gcal-btn');
-    btn.classList.add('connected');
-    btn.innerHTML = `<span class="status-dot"></span> Google Calendar Connected (${items.length} events today)`;
-    showToast(`Synced ${items.length} events from Google Calendar.`);
-  } catch (err) {
-    showToast('Error fetching calendar: ' + (err.message || err));
-  }
-}
 
 // ──────────────────────────────────────────────
 // GENERATE SCHEDULE (Claude API)
