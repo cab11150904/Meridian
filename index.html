@@ -1330,6 +1330,7 @@ function startAutoRefresh() {
       }
       await fetchCalendarEvents();
       updateLastSyncUI();
+      resetCountdown();
     } catch(e) {
       console.warn('[Meridian] Auto-refresh failed:', e);
     }
@@ -1394,23 +1395,58 @@ async function fetchCalendarEvents() {
 }
 
 // ── Update button to connected state ───────────────
-function setGcalConnectedUI(count) {
+let countdownTimer = null;
+let nextRefreshAt = 0;
+
+function setGcalConnectedUI() {
   state.gcalConnected = true;
   const btn = document.getElementById('gcal-btn');
   btn.classList.add('connected');
   btn.style.pointerEvents = '';
   btn.onclick = () => {
-    // Clicking while connected forces a manual refresh
-    fetchCalendarEvents().then(n => showToast(`Refreshed — ${n} events today.`)).catch(() => {});
+    // Manual refresh — reset the countdown
+    fetchCalendarEvents()
+      .then(n => { showToast(`Refreshed — ${n} events today.`); resetCountdown(); })
+      .catch(() => {});
   };
   updateLastSyncUI();
+  resetCountdown();
+}
+
+function resetCountdown() {
+  nextRefreshAt = Date.now() + REFRESH_INTERVAL_MS;
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = setInterval(tickCountdown, 1000);
+}
+
+function tickCountdown() {
+  if (!state.gcalConnected) { clearInterval(countdownTimer); return; }
+  const el = document.getElementById('gcal-countdown');
+  if (!el) return;
+  const secsLeft = Math.max(0, Math.round((nextRefreshAt - Date.now()) / 1000));
+  const m = Math.floor(secsLeft / 60);
+  const s = secsLeft % 60;
+  const label = secsLeft === 0 ? 'refreshing…' : `${m}:${String(s).padStart(2,'0')}`;
+  // Pulse the dot when under 10s
+  const dot = document.getElementById('gcal-status-dot');
+  if (dot) dot.style.opacity = secsLeft <= 10 && secsLeft % 2 === 0 ? '0.3' : '1';
+  el.textContent = label;
 }
 
 function updateLastSyncUI() {
   const now = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const btn = document.getElementById('gcal-btn');
   const count = state.events.filter(e => e.source === 'gcal').length;
-  btn.innerHTML = `<span class="status-dot"></span> ${count} event${count !== 1 ? 's' : ''} · synced ${now} <span style="opacity:0.5;margin-left:0.5rem;font-size:0.55rem;">click to refresh</span>`;
+  btn.innerHTML = `
+    <span id="gcal-status-dot" class="status-dot"></span>
+    <span>${count} event${count !== 1 ? 's' : ''} · synced ${now}</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:0.35rem;opacity:0.45;font-size:0.55rem;">
+      next <span id="gcal-countdown" style="font-variant-numeric:tabular-nums;min-width:2.2rem;text-align:right;">5:00</span>
+    </span>`;
+  // Make the button a flex row so the countdown sits on the right
+  btn.style.display = 'flex';
+  btn.style.justifyContent = 'flex-start';
+  btn.style.gap = '0.5rem';
 }
 
 function loadScript(src) {
