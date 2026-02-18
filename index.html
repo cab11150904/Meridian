@@ -1232,75 +1232,135 @@ let gapiInitialized = false;
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
-    // Don't load twice
     if (document.querySelector(`script[src="${src}"]`)) {
       resolve();
       return;
     }
     const s = document.createElement('script');
     s.src = src;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+    s.onload = () => { console.log('[Meridian] Loaded:', src); resolve(); };
+    s.onerror = (e) => reject(new Error('Network blocked loading: ' + src));
     document.head.appendChild(s);
   });
 }
 
+function errStr(e) {
+  if (!e) return 'Unknown error (null)';
+  if (typeof e === 'string') return e;
+  if (e.message) return e.message;
+  if (e.details) return e.details;
+  if (e.error) return typeof e.error === 'string' ? e.error : JSON.stringify(e.error);
+  try { return JSON.stringify(e); } catch(_) { return String(e); }
+}
+
 async function initGapiClient() {
+  console.log('[Meridian] Loading gapi client library...');
   await new Promise((resolve, reject) => {
-    gapi.load('client', { callback: resolve, onerror: reject });
+    gapi.load('client', {
+      callback: resolve,
+      onerror: (e) => reject(new Error('gapi.load failed: ' + errStr(e))),
+      timeout: 10000,
+      ontimeout: () => reject(new Error('gapi.load timed out')),
+    });
   });
-  await gapi.client.init({
-    apiKey: state.gcalApiKey,
-    discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
-  });
+
+  console.log('[Meridian] Initializing gapi client...');
+  try {
+    await gapi.client.init({
+      apiKey: state.gcalApiKey,
+      discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
+    });
+  } catch(e) {
+    const msg = errStr(e);
+    if (msg.includes('idpiframe') || msg.includes('Not a valid origin')) {
+      throw new Error('Origin not authorized. Add "' + location.origin + '" to your OAuth client\'s allowed origins in Google Cloud Console.');
+    }
+    throw new Error('gapi.client.init failed: ' + msg);
+  }
+
   gapiInitialized = true;
+  console.log('[Meridian] gapi client ready.');
 }
 
 async function connectGoogleCalendar() {
   if (!state.gcalClientId || !state.gcalApiKey) {
-    showToast('Google Calendar credentials not configured. Open Settings.');
+    showToast('No credentials. Open Settings and add your Google Client ID and API Key.');
     return;
   }
 
   const btn = document.getElementById('gcal-btn');
-  btn.innerHTML = `<span style="opacity:0.6;">Loading Google APIs...</span>`;
-  btn.style.pointerEvents = 'none';
+  const setStatus = (msg) => {
+    btn.style.pointerEvents = 'none';
+    btn.innerHTML = `<span style="opacity:0.6;font-family:var(--font-mono);font-size:0.65rem;">${msg}</span>`;
+  };
+
+  setStatus('⏳ Loading Google scripts...');
 
   try {
-    // Load both scripts in parallel
-    await Promise.all([
-      loadScript('https://apis.google.com/js/api.js'),
-      loadScript('https://accounts.google.com/gsi/client'),
-    ]);
+    await loadScript('https://apis.google.com/js/api.js');
+    console.log('[Meridian] api.js loaded, gapi =', typeof gapi);
+  } catch(e) {
+    showGcalError(errStr(e) + ' — Check your internet connection or if a content blocker is active.');
+    return;
+  }
 
-    // Initialize gapi client if not done yet
-    if (!gapiInitialized) {
-      await initGapiClient();
-    }
+  try {
+    await loadScript('https://accounts.google.com/gsi/client');
+    console.log('[Meridian] gsi/client loaded, google =', typeof google);
+  } catch(e) {
+    showGcalError(errStr(e) + ' — Check your internet connection or if a content blocker is active.');
+    return;
+  }
 
-    // Initialize token client
+  setStatus('⏳ Initializing Calendar API...');
+
+  try {
+    if (!gapiInitialized) await initGapiClient();
+  } catch(e) {
+    showGcalError(errStr(e));
+    return;
+  }
+
+  setStatus('⏳ Opening Google sign-in...');
+
+  try {
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: state.gcalClientId,
       scope: 'https://www.googleapis.com/auth/calendar.readonly',
       callback: handleGCalTokenResponse,
-      error_callback: (err) => {
-        showToast('Auth error: ' + (err.message || err.type || 'Unknown error'));
-        resetGcalBtn();
+      error_callback: (e) => {
+        showGcalError('OAuth error: ' + errStr(e));
       },
     });
-
-    btn.innerHTML = `<span style="opacity:0.6;">Waiting for Google sign-in...</span>`;
     tokenClient.requestAccessToken({ prompt: 'consent' });
-
-  } catch (err) {
-    showToast('Failed to load Google APIs: ' + err.message);
-    resetGcalBtn();
+  } catch(e) {
+    showGcalError('Failed to open sign-in popup: ' + errStr(e));
   }
+}
+
+function showGcalError(msg) {
+  console.error('[Meridian] GCal error:', msg);
+  const btn = document.getElementById('gcal-btn');
+  btn.style.pointerEvents = '';
+  btn.style.borderColor = 'var(--red)';
+  btn.style.color = 'var(--red)';
+  btn.innerHTML = `⚠ ${msg}`;
+  // Also show a copy in the events area for longer messages
+  const container = document.getElementById('events-list');
+  container.innerHTML = `
+    <div style="border:1px solid var(--red);padding:1rem;font-family:var(--font-mono);font-size:0.7rem;color:var(--red);line-height:1.6;margin-top:0.5rem;">
+      <strong>Google Calendar Error</strong><br><br>${msg}<br><br>
+      <span style="color:var(--text-dim);">Your origin: <strong style="color:var(--cream);">${location.origin}</strong><br>
+      Make sure this is listed under Authorized JavaScript Origins in your OAuth 2.0 client at<br>
+      <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--amber);">console.cloud.google.com/apis/credentials</a></span>
+    </div>`;
 }
 
 function resetGcalBtn() {
   const btn = document.getElementById('gcal-btn');
   btn.style.pointerEvents = '';
+  btn.style.borderColor = '';
+  btn.style.color = '';
   btn.innerHTML = `
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
     Connect Google Calendar
