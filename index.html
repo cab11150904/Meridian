@@ -1001,6 +1001,12 @@
     <input type="text" id="s-start" />
     <label>Work End Time</label>
     <input type="text" id="s-end" />
+    <div style="height:1px;background:var(--border);margin:0.75rem 0;"></div>
+    <div style="font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.2em;color:var(--amber);margin-bottom:1rem;text-transform:uppercase;">Google Calendar</div>
+    <label>OAuth Client ID</label>
+    <input type="text" id="s-gcal-client" placeholder="123456789-xxx.apps.googleusercontent.com" />
+    <label>API Key</label>
+    <input type="text" id="s-gcal-apikey" placeholder="AIzaSy..." />
     <button class="primary" onclick="saveSettings()">Save Settings</button>
   </div>
 </div>
@@ -1087,6 +1093,8 @@ function openSettings() {
   document.getElementById('s-role').value = state.role;
   document.getElementById('s-start').value = state.workStart;
   document.getElementById('s-end').value = state.workEnd;
+  document.getElementById('s-gcal-client').value = state.gcalClientId || '';
+  document.getElementById('s-gcal-apikey').value = state.gcalApiKey || '';
   document.getElementById('settings-modal').classList.add('open');
 }
 
@@ -1100,6 +1108,16 @@ function saveSettings() {
   state.role = document.getElementById('s-role').value.trim();
   state.workStart = document.getElementById('s-start').value.trim() || state.workStart;
   state.workEnd = document.getElementById('s-end').value.trim() || state.workEnd;
+  const newClientId = document.getElementById('s-gcal-client').value.trim();
+  const newApiKey = document.getElementById('s-gcal-apikey').value.trim();
+  // If credentials changed, reset gapi so it re-initializes with new values
+  if (newClientId !== state.gcalClientId || newApiKey !== state.gcalApiKey) {
+    gapiInitialized = false;
+    tokenClient = null;
+    resetGcalBtn();
+  }
+  state.gcalClientId = newClientId;
+  state.gcalApiKey = newApiKey;
   saveState();
   closeSettings();
   showToast('Settings saved.');
