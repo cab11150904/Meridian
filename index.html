@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meridian — Daily Intelligence Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=IBM+Plex+Mono:wght@300;400;500&family=Crimson+Pro:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0c0e14;
+    --surface: #12151e;
+    --surface2: #1a1e2a;
+    --border: #252836;
+    --amber: #c9933a;
+    --amber-light: #e8b96a;
+    --amber-dim: #7a5520;
+    --cream: #ede8df;
+    --cream-dim: #8a8278;
+    --teal: #3d8c80;
+    --teal-light: #5bb8a8;
+    --red: #c05050;
+    --text: #d4cec5;
+    --text-dim: #6b6560;
+    --font-display: 'Cormorant Garamond', Georgia, serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+    --font-body: 'Crimson Pro', Georgia, serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 16px;
+    overflow-x: hidden;
+  }
+
+  /* Background texture */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: 
+      radial-gradient(ellipse 80% 60% at 10% 90%, rgba(61,140,128,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 90% 10%, rgba(201,147,58,0.07) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── SETUP SCREEN ── */
+  #setup-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+
+  .setup-card {
+    max-width: 560px;
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 3rem;
+    position: relative;
+  }
+
+  .setup-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--amber), transparent);
+  }
+
+  .setup-logo {
+    font-family: var(--font-display);
+    font-size: 2.4rem;
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    color: var(--cream);
+    margin-bottom: 0.25rem;
+  }
+
+  .setup-logo span { color: var(--amber); }
+
+  .setup-tagline {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 2.5rem;
+  }
+
+  .setup-section {
+    margin-bottom: 2rem;
+  }
+
+  .setup-section h3 {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .setup-section h3::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    margin-bottom: 0.4rem;
+    text-transform: uppercase;
+  }
+
+  input[type="text"], input[type="password"], textarea, select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--cream);
+    padding: 0.75rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    outline: none;
+    transition: border-color 0.2s;
+    margin-bottom: 1rem;
+  }
+
+  input:focus, textarea:focus, select:focus {
+    border-color: var(--amber-dim);
+  }
+
+  .hint {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: -0.7rem;
+    margin-bottom: 1rem;
+    font-family: var(--font-mono);
+    line-height: 1.5;
+  }
+
+  .hint a { color: var(--amber); text-decoration: none; }
+
+  button.primary {
+    width: 100%;
+    background: var(--amber);
+    color: #0c0e14;
+    border: none;
+    padding: 0.9rem 2rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+  }
+
+  button.primary:hover { background: var(--amber-light); }
+  button.primary:active { transform: scale(0.99); }
+
+  button.secondary {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    padding: 0.6rem 1.2rem;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  button.secondary:hover {
+    border-color: var(--amber-dim);
+    color: var(--amber);
+  }
+
+  /* ── MAIN LAYOUT ── */
+  #app {
+    display: none;
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    flex-direction: column;
+  }
+
+  #app.visible { display: flex; }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.25rem 2rem;
+    border-bottom: 1px solid var(--border);
+    background: rgba(12,14,20,0.8);
+    backdrop-filter: blur(10px);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+  }
+
+  .logo {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    font-weight: 300;
+    letter-spacing: 0.12em;
+    color: var(--cream);
+  }
+
+  .logo span { color: var(--amber); }
+
+  .date-pill {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.15em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    border: 1px solid var(--border);
+    padding: 0.25rem 0.7rem;
+  }
+
+  .header-right {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  /* Main grid */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 280px 1fr 340px;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* Column panels */
+  .panel {
+    border-right: 1px solid var(--border);
+    padding: 1.5rem;
+    overflow-y: auto;
+    min-height: calc(100vh - 64px);
+  }
+
+  .panel:last-child { border-right: none; }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+  }
+
+  .panel-title {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--amber);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .panel-title .dot {
+    width: 4px; height: 4px;
+    background: var(--amber);
+    border-radius: 50%;
+  }
+
+  /* Goal cards */
+  .goal-section {
+    margin-bottom: 2rem;
+  }
+
+  .goal-section-label {
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .goal-section-label.work::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--amber);
+  }
+
+  .goal-section-label.personal::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--teal);
+  }
+
+  .goal-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    position: relative;
+  }
+
+  .goal-item:hover { border-color: var(--amber-dim); }
+
+  .goal-item.work .goal-marker { background: var(--amber); }
+  .goal-item.personal .goal-marker { background: var(--teal); }
+
+  .goal-marker {
+    width: 3px;
+    min-height: 100%;
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+  }
+
+  .goal-text {
+    font-size: 0.85rem;
+    color: var(--text);
+    line-height: 1.4;
+    flex: 1;
+    padding-left: 0.25rem;
+  }
+
+  .goal-delete {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .goal-item:hover .goal-delete { opacity: 1; }
+  .goal-delete:hover { color: var(--red); }
+
+  .add-goal-form {
+    margin-top: 0.75rem;
+  }
+
+  .add-goal-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .add-goal-row input {
+    flex: 1;
+    margin-bottom: 0;
+    font-size: 0.75rem;
+    padding: 0.6rem 0.8rem;
+  }
+
+  .add-goal-row button {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--amber);
+    padding: 0.6rem 0.8rem;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    line-height: 1;
+  }
+
+  .add-goal-row button:hover {
+    background: var(--amber);
+    color: var(--bg);
+    border-color: var(--amber);
+  }
+
+  /* Calendar panel */
+  .calendar-panel { }
+
+  .event-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--amber);
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    position: relative;
+  }
+
+  .event-item.personal { border-left-color: var(--teal); }
+
+  .event-time {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--amber);
+    letter-spacing: 0.1em;
+    margin-bottom: 0.25rem;
+  }
+
+  .event-item.personal .event-time { color: var(--teal); }
+
+  .event-title {
+    font-size: 0.9rem;
+    color: var(--cream);
+    line-height: 1.3;
+  }
+
+  .event-meta {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 0.2rem;
+  }
+
+  .event-delete {
+    position: absolute;
+    top: 0.5rem; right: 0.5rem;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+    font-size: 0.75rem;
+  }
+
+  .event-item:hover .event-delete { opacity: 1; }
+  .event-delete:hover { color: var(--red); }
+
+  /* Add event form */
+  .add-event-form {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .add-event-form input,
+  .add-event-form select {
+    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .form-row input { margin-bottom: 0; }
+
+  /* Schedule panel */
+  .schedule-panel {
+    background: var(--surface);
+  }
+
+  .generate-btn {
+    width: 100%;
+    background: linear-gradient(135deg, var(--amber) 0%, #b07e28 100%);
+    color: #0c0e14;
+    border: none;
+    padding: 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 1.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .generate-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .generate-btn:hover::before { opacity: 1; }
+  .generate-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .schedule-output {
+    min-height: 400px;
+  }
+
+  .schedule-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--text-dim);
+  }
+
+  .schedule-empty .icon {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+    opacity: 0.3;
+  }
+
+  .schedule-empty p {
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+
+  /* Schedule time blocks */
+  .schedule-block {
+    border: 1px solid var(--border);
+    padding: 1rem;
+    margin-bottom: 0.6rem;
+    position: relative;
+    overflow: hidden;
+    animation: slideIn 0.3s ease both;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .schedule-block.focus { border-left: 3px solid var(--amber); }
+  .schedule-block.break { border-left: 3px solid var(--teal); background: rgba(61,140,128,0.05); }
+  .schedule-block.personal { border-left: 3px solid #7e6aaf; }
+  .schedule-block.admin { border-left: 3px solid var(--text-dim); }
+
+  .block-time {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    color: var(--amber);
+    margin-bottom: 0.3rem;
+  }
+
+  .schedule-block.break .block-time { color: var(--teal); }
+  .schedule-block.personal .block-time { color: #9d8fd0; }
+
+  .block-title {
+    font-size: 0.95rem;
+    color: var(--cream);
+    font-weight: 500;
+    margin-bottom: 0.2rem;
+  }
+
+  .block-desc {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    line-height: 1.4;
+  }
+
+  .block-tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.5rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    margin-top: 0.4rem;
+    border: 1px solid;
+  }
+
+  .schedule-block.focus .block-tag { color: var(--amber-dim); border-color: var(--amber-dim); }
+  .schedule-block.break .block-tag { color: var(--teal); border-color: var(--teal); }
+  .schedule-block.personal .block-tag { color: #7e6aaf; border-color: #7e6aaf; }
+  .schedule-block.admin .block-tag { color: var(--text-dim); border-color: var(--text-dim); }
+
+  /* Loading state */
+  .loading-bar {
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--amber), transparent);
+    animation: loading 1.5s infinite;
+    margin-bottom: 1rem;
+  }
+
+  @keyframes loading {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+  }
+
+  .loading-text {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    text-align: center;
+    letter-spacing: 0.1em;
+    padding: 2rem;
+  }
+
+  /* Context area */
+  .context-input {
+    margin-bottom: 1rem;
+  }
+
+  .context-input label {
+    font-size: 0.6rem;
+  }
+
+  .context-input textarea {
+    resize: vertical;
+    min-height: 80px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    margin-bottom: 0;
+  }
+
+  /* Google Cal connect button */
+  .gcal-btn {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .gcal-btn:hover {
+    border-color: var(--teal);
+    color: var(--teal-light);
+  }
+
+  .gcal-btn.connected {
+    border-color: var(--teal);
+    color: var(--teal-light);
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--teal);
+  }
+
+  /* Stats row */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 0.75rem;
+    text-align: center;
+  }
+
+  .stat-val {
+    font-family: var(--font-mono);
+    font-size: 1.3rem;
+    color: var(--amber);
+    display: block;
+  }
+
+  .stat-label {
+    font-family: var(--font-mono);
+    font-size: 0.5rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(12,14,20,0.85);
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    backdrop-filter: blur(4px);
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 2rem;
+    max-width: 480px;
+    width: 100%;
+    position: relative;
+  }
+
+  .modal::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--amber), transparent);
+  }
+
+  .modal h3 {
+    font-family: var(--font-display);
+    font-size: 1.4rem;
+    font-weight: 300;
+    color: var(--cream);
+    margin-bottom: 1rem;
+  }
+
+  .modal p {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+  }
+
+  .modal-close {
+    position: absolute;
+    top: 1rem; right: 1rem;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 1rem;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .main-grid {
+      grid-template-columns: 1fr;
+    }
+    .panel {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      min-height: auto;
+    }
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--teal);
+    padding: 0.75rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--cream);
+    z-index: 300;
+    animation: toastIn 0.3s ease;
+    letter-spacing: 0.05em;
+  }
+
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 1.5rem 0;
+  }
+
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b6560'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── SETUP SCREEN ── -->
+<div id="setup-screen">
+  <div class="setup-card">
+    <div class="setup-logo">Meri<span>dian</span></div>
+    <div class="setup-tagline">Daily Intelligence Assistant</div>
+
+    <div class="setup-section">
+      <h3>Anthropic API</h3>
+      <label>API Key (required)</label>
+      <input type="password" id="setup-api-key" placeholder="sk-ant-api03-..." />
+      <div class="hint">Your key is stored locally in your browser and never sent anywhere except Anthropic. <a href="https://console.anthropic.com" target="_blank">Get one here →</a></div>
+    </div>
+
+    <div class="setup-section">
+      <h3>Google Calendar <span style="color:var(--text-dim);font-size:0.55rem;">(optional)</span></h3>
+      <label>OAuth Client ID</label>
+      <input type="text" id="setup-gcal-client" placeholder="123456789-xxx.apps.googleusercontent.com" />
+      <label>API Key</label>
+      <input type="text" id="setup-gcal-apikey" placeholder="AIzaSy..." />
+      <div class="hint">Leave blank to add calendar events manually. To enable Google Calendar, create a project at <a href="https://console.cloud.google.com" target="_blank">Google Cloud Console →</a>, enable the Calendar API, and create OAuth 2.0 credentials. Set your domain as an authorized JavaScript origin.</div>
+    </div>
+
+    <div class="setup-section">
+      <h3>Your Profile</h3>
+      <label>Name</label>
+      <input type="text" id="setup-name" placeholder="e.g. Alex" />
+      <label>Role / Context</label>
+      <input type="text" id="setup-role" placeholder="e.g. Product Manager at a tech startup" />
+      <label>Work Hours</label>
+      <div class="form-row" style="margin-bottom:1rem;">
+        <input type="text" id="setup-start" placeholder="Start: 9:00 AM" style="margin-bottom:0;" />
+        <input type="text" id="setup-end" placeholder="End: 6:00 PM" style="margin-bottom:0;" />
+      </div>
+    </div>
+
+    <button class="primary" onclick="completeSetup()">Enter Meridian →</button>
+  </div>
+</div>
+
+<!-- ── MAIN APP ── -->
+<div id="app">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">Meri<span>dian</span></div>
+      <div class="date-pill" id="header-date">—</div>
+    </div>
+    <div class="header-right">
+      <button class="secondary" onclick="openSettings()">Settings</button>
+    </div>
+  </header>
+
+  <!-- Main grid -->
+  <div class="main-grid">
+
+    <!-- ── GOALS PANEL ── -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title"><span class="dot"></span>Goals & Priorities</div>
+      </div>
+
+      <div class="goal-section">
+        <div class="goal-section-label work">Work Goals</div>
+        <div id="work-goals-list"></div>
+        <div class="add-goal-form">
+          <div class="add-goal-row">
+            <input type="text" id="new-work-goal" placeholder="Add a work goal..." onkeydown="if(event.key==='Enter')addGoal('work')" />
+            <button onclick="addGoal('work')">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <div class="goal-section">
+        <div class="goal-section-label personal">Personal Goals</div>
+        <div id="personal-goals-list"></div>
+        <div class="add-goal-form">
+          <div class="add-goal-row">
+            <input type="text" id="new-personal-goal" placeholder="Add a personal goal..." onkeydown="if(event.key==='Enter')addGoal('personal')" />
+            <button onclick="addGoal('personal')" style="border-color: var(--teal); color: var(--teal);">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <div class="stats-row">
+        <div class="stat-card">
+          <span class="stat-val" id="stat-work">0</span>
+          <span class="stat-label">Work</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-val" id="stat-personal">0</span>
+          <span class="stat-label">Personal</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-val" id="stat-events">0</span>
+          <span class="stat-label">Events</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CALENDAR PANEL ── -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title"><span class="dot"></span>Today's Calendar</div>
+        <button class="secondary" onclick="toggleAddEvent()" id="add-event-btn">+ Add</button>
+      </div>
+
+      <!-- Google Cal connect -->
+      <button class="gcal-btn" id="gcal-btn" onclick="connectGoogleCalendar()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        Connect Google Calendar
+      </button>
+
+      <!-- Add event form (hidden by default) -->
+      <div class="add-event-form" id="add-event-form" style="display:none;">
+        <input type="text" id="evt-title" placeholder="Event title" />
+        <div class="form-row">
+          <input type="text" id="evt-start" placeholder="Start (9:00 AM)" />
+          <input type="text" id="evt-end" placeholder="End (10:00 AM)" />
+        </div>
+        <select id="evt-type">
+          <option value="work">Work</option>
+          <option value="personal">Personal</option>
+        </select>
+        <input type="text" id="evt-notes" placeholder="Notes / description (optional)" />
+        <div style="display:flex;gap:0.5rem;">
+          <button class="primary" style="flex:1;padding:0.6rem;" onclick="addEvent()">Add Event</button>
+          <button class="secondary" onclick="toggleAddEvent()">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Events list -->
+      <div id="events-list">
+        <div style="text-align:center;padding:3rem 1rem;color:var(--text-dim);">
+          <div style="font-size:1.5rem;margin-bottom:0.75rem;opacity:0.3;">◇</div>
+          <p style="font-size:0.85rem;">No events yet. Connect Google Calendar or add events manually.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SCHEDULE PANEL ── -->
+    <div class="panel schedule-panel">
+      <div class="panel-header">
+        <div class="panel-title"><span class="dot"></span>Daily Schedule</div>
+      </div>
+
+      <div class="context-input">
+        <label>Today's Context / Focus</label>
+        <textarea id="daily-context" placeholder="e.g. I have a big presentation tomorrow, feeling a bit scattered, want to prioritize deep work this morning..."></textarea>
+      </div>
+
+      <button class="generate-btn" id="generate-btn" onclick="generateSchedule()">
+        ◈ &nbsp; Build My Day
+      </button>
+
+      <div id="schedule-output">
+        <div class="schedule-empty">
+          <div class="icon">◈</div>
+          <p>Add your goals and calendar events, then click <em>Build My Day</em> to generate your personalized daily schedule.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeSettings()">✕</button>
+    <h3>Settings</h3>
+    <p>Update your configuration. Changes are saved to localStorage.</p>
+    <label>Anthropic API Key</label>
+    <input type="password" id="s-apikey" />
+    <label>Your Name</label>
+    <input type="text" id="s-name" />
+    <label>Role / Context</label>
+    <input type="text" id="s-role" />
+    <label>Work Start Time</label>
+    <input type="text" id="s-start" />
+    <label>Work End Time</label>
+    <input type="text" id="s-end" />
+    <button class="primary" onclick="saveSettings()">Save Settings</button>
+  </div>
+</div>
+
+<!-- GAPI Script (loaded dynamically) -->
+<script>
+// ──────────────────────────────────────────────
+// STATE
+// ──────────────────────────────────────────────
+let state = {
+  apiKey: '',
+  gcalClientId: '',
+  gcalApiKey: '',
+  name: '',
+  role: '',
+  workStart: '9:00 AM',
+  workEnd: '6:00 PM',
+  workGoals: [],
+  personalGoals: [],
+  events: [],
+  gcalConnected: false
+};
+
+// ──────────────────────────────────────────────
+// INIT
+// ──────────────────────────────────────────────
+function init() {
+  const saved = localStorage.getItem('meridian_state');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      state = { ...state, ...parsed };
+    } catch(e) {}
+  }
+
+  if (state.apiKey) {
+    showApp();
+  }
+
+  // Set date
+  const now = new Date();
+  const opts = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' };
+  document.getElementById('header-date').textContent = now.toLocaleDateString('en-US', opts);
+}
+
+function saveState() {
+  localStorage.setItem('meridian_state', JSON.stringify(state));
+}
+
+// ──────────────────────────────────────────────
+// SETUP
+// ──────────────────────────────────────────────
+function completeSetup() {
+  const apiKey = document.getElementById('setup-api-key').value.trim();
+  if (!apiKey) {
+    showToast('Please enter your Anthropic API key.');
+    return;
+  }
+  state.apiKey = apiKey;
+  state.gcalClientId = document.getElementById('setup-gcal-client').value.trim();
+  state.gcalApiKey = document.getElementById('setup-gcal-apikey').value.trim();
+  state.name = document.getElementById('setup-name').value.trim() || 'there';
+  state.role = document.getElementById('setup-role').value.trim();
+  state.workStart = document.getElementById('setup-start').value.trim() || '9:00 AM';
+  state.workEnd = document.getElementById('setup-end').value.trim() || '6:00 PM';
+  saveState();
+  showApp();
+}
+
+function showApp() {
+  document.getElementById('setup-screen').style.display = 'none';
+  document.getElementById('app').classList.add('visible');
+  renderGoals();
+  renderEvents();
+  updateStats();
+  if (state.gcalClientId) loadGapi();
+}
+
+// ──────────────────────────────────────────────
+// SETTINGS MODAL
+// ──────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('s-apikey').value = state.apiKey;
+  document.getElementById('s-name').value = state.name;
+  document.getElementById('s-role').value = state.role;
+  document.getElementById('s-start').value = state.workStart;
+  document.getElementById('s-end').value = state.workEnd;
+  document.getElementById('settings-modal').classList.add('open');
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.remove('open');
+}
+
+function saveSettings() {
+  state.apiKey = document.getElementById('s-apikey').value.trim();
+  state.name = document.getElementById('s-name').value.trim() || state.name;
+  state.role = document.getElementById('s-role').value.trim();
+  state.workStart = document.getElementById('s-start').value.trim() || state.workStart;
+  state.workEnd = document.getElementById('s-end').value.trim() || state.workEnd;
+  saveState();
+  closeSettings();
+  showToast('Settings saved.');
+}
+
+// ──────────────────────────────────────────────
+// GOALS
+// ──────────────────────────────────────────────
+function addGoal(type) {
+  const inputId = type === 'work' ? 'new-work-goal' : 'new-personal-goal';
+  const input = document.getElementById(inputId);
+  const text = input.value.trim();
+  if (!text) return;
+
+  if (type === 'work') state.workGoals.push(text);
+  else state.personalGoals.push(text);
+
+  input.value = '';
+  saveState();
+  renderGoals();
+  updateStats();
+}
+
+function removeGoal(type, idx) {
+  if (type === 'work') state.workGoals.splice(idx, 1);
+  else state.personalGoals.splice(idx, 1);
+  saveState();
+  renderGoals();
+  updateStats();
+}
+
+function renderGoals() {
+  renderGoalList('work-goals-list', state.workGoals, 'work');
+  renderGoalList('personal-goals-list', state.personalGoals, 'personal');
+}
+
+function renderGoalList(containerId, goals, type) {
+  const container = document.getElementById(containerId);
+  if (goals.length === 0) {
+    container.innerHTML = `<div style="font-size:0.75rem;color:var(--text-dim);padding:0.5rem 0;font-family:var(--font-mono);">No ${type} goals yet.</div>`;
+    return;
+  }
+  container.innerHTML = goals.map((g, i) => `
+    <div class="goal-item ${type}">
+      <div class="goal-marker"></div>
+      <div class="goal-text">${escapeHtml(g)}</div>
+      <button class="goal-delete" onclick="removeGoal('${type}', ${i})">✕</button>
+    </div>
+  `).join('');
+}
+
+// ──────────────────────────────────────────────
+// EVENTS
+// ──────────────────────────────────────────────
+function toggleAddEvent() {
+  const form = document.getElementById('add-event-form');
+  const btn = document.getElementById('add-event-btn');
+  const visible = form.style.display !== 'none';
+  form.style.display = visible ? 'none' : 'block';
+  btn.textContent = visible ? '+ Add' : '✕ Close';
+}
+
+function addEvent() {
+  const title = document.getElementById('evt-title').value.trim();
+  const start = document.getElementById('evt-start').value.trim();
+  const end = document.getElementById('evt-end').value.trim();
+  const type = document.getElementById('evt-type').value;
+  const notes = document.getElementById('evt-notes').value.trim();
+
+  if (!title || !start) {
+    showToast('Title and start time are required.');
+    return;
+  }
+
+  state.events.push({ title, start, end, type, notes, source: 'manual' });
+  saveState();
+  renderEvents();
+  updateStats();
+
+  document.getElementById('evt-title').value = '';
+  document.getElementById('evt-start').value = '';
+  document.getElementById('evt-end').value = '';
+  document.getElementById('evt-notes').value = '';
+  toggleAddEvent();
+}
+
+function removeEvent(idx) {
+  state.events.splice(idx, 1);
+  saveState();
+  renderEvents();
+  updateStats();
+}
+
+function renderEvents() {
+  const container = document.getElementById('events-list');
+  if (state.events.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center;padding:3rem 1rem;color:var(--text-dim);">
+        <div style="font-size:1.5rem;margin-bottom:0.75rem;opacity:0.3;">◇</div>
+        <p style="font-size:0.85rem;">No events yet. Connect Google Calendar or add events manually.</p>
+      </div>`;
+    return;
+  }
+
+  // Sort by start time
+  const sorted = [...state.events].map((e, i) => ({ ...e, _idx: i }));
+
+  container.innerHTML = sorted.map(evt => `
+    <div class="event-item ${evt.type}">
+      <button class="event-delete" onclick="removeEvent(${evt._idx})">✕</button>
+      <div class="event-time">${escapeHtml(evt.start)}${evt.end ? ' – ' + escapeHtml(evt.end) : ''} · ${evt.type}</div>
+      <div class="event-title">${escapeHtml(evt.title)}</div>
+      ${evt.notes ? `<div class="event-meta">${escapeHtml(evt.notes)}</div>` : ''}
+      ${evt.source === 'gcal' ? `<div class="event-meta" style="color:var(--teal);font-family:var(--font-mono);font-size:0.55rem;margin-top:0.3rem;">● Google Calendar</div>` : ''}
+    </div>
+  `).join('');
+}
+
+function updateStats() {
+  document.getElementById('stat-work').textContent = state.workGoals.length;
+  document.getElementById('stat-personal').textContent = state.personalGoals.length;
+  document.getElementById('stat-events').textContent = state.events.length;
+}
+
+// ──────────────────────────────────────────────
+// GOOGLE CALENDAR
+// ──────────────────────────────────────────────
+let gapiReady = false;
+let gisReady = false;
+let tokenClient = null;
+
+function loadGapi() {
+  if (!state.gcalClientId || !state.gcalApiKey) return;
+
+  const gapiScript = document.createElement('script');
+  gapiScript.src = 'https://apis.google.com/js/api.js';
+  gapiScript.onload = () => {
+    gapi.load('client', async () => {
+      await gapi.client.init({
+        apiKey: state.gcalApiKey,
+        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
+      });
+      gapiReady = true;
+    });
+  };
+  document.head.appendChild(gapiScript);
+
+  const gisScript = document.createElement('script');
+  gisScript.src = 'https://accounts.google.com/gsi/client';
+  gisScript.onload = () => {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: state.gcalClientId,
+      scope: 'https://www.googleapis.com/auth/calendar.readonly',
+      callback: handleGCalTokenResponse,
+    });
+    gisReady = true;
+  };
+  document.head.appendChild(gisScript);
+}
+
+function connectGoogleCalendar() {
+  if (!state.gcalClientId || !state.gcalApiKey) {
+    showToast('Google Calendar credentials not configured. Check Settings.');
+    return;
+  }
+
+  if (!gapiReady || !gisReady) {
+    showToast('Google APIs still loading, please wait a moment...');
+    setTimeout(connectGoogleCalendar, 1000);
+    return;
+  }
+
+  tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+async function handleGCalTokenResponse(resp) {
+  if (resp.error) {
+    showToast('Google Calendar auth failed: ' + resp.error);
+    return;
+  }
+
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const response = await gapi.client.calendar.events.list({
+      calendarId: 'primary',
+      timeMin: today.toISOString(),
+      timeMax: tomorrow.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+
+    const items = response.result.items || [];
+
+    // Remove existing gcal events
+    state.events = state.events.filter(e => e.source !== 'gcal');
+
+    items.forEach(item => {
+      const startDt = item.start.dateTime || item.start.date;
+      const endDt = item.end?.dateTime || item.end?.date;
+
+      const fmt = (dt) => {
+        if (!dt) return '';
+        const d = new Date(dt);
+        if (isNaN(d)) return dt;
+        return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      };
+
+      state.events.push({
+        title: item.summary || 'Untitled event',
+        start: fmt(startDt),
+        end: fmt(endDt),
+        type: 'work',
+        notes: item.description || '',
+        source: 'gcal'
+      });
+    });
+
+    saveState();
+    renderEvents();
+    updateStats();
+
+    state.gcalConnected = true;
+    const btn = document.getElementById('gcal-btn');
+    btn.classList.add('connected');
+    btn.innerHTML = `<span class="status-dot"></span> Google Calendar Connected (${items.length} events today)`;
+    showToast(`Synced ${items.length} events from Google Calendar.`);
+  } catch (err) {
+    showToast('Error fetching calendar: ' + (err.message || err));
+  }
+}
+
+// ──────────────────────────────────────────────
+// GENERATE SCHEDULE (Claude API)
+// ──────────────────────────────────────────────
+async function generateSchedule() {
+  if (!state.apiKey) {
+    showToast('No API key configured. Open Settings.');
+    return;
+  }
+
+  const btn = document.getElementById('generate-btn');
+  const output = document.getElementById('schedule-output');
+  const dailyContext = document.getElementById('daily-context').value.trim();
+
+  btn.disabled = true;
+  btn.textContent = '◈   Analyzing...';
+  output.innerHTML = `
+    <div class="loading-bar" style="width:100%;overflow:hidden;"></div>
+    <div class="loading-text">Meridian is building your day...</div>
+  `;
+
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const timeStr = today.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+  const prompt = `You are Meridian, an expert productivity assistant and daily planner. Your task is to create a detailed, realistic, and optimized daily schedule for today.
+
+# User Profile
+- Name: ${state.name}
+- Role: ${state.role || 'Professional'}
+- Work Hours: ${state.workStart} to ${state.workEnd}
+- Today: ${dateStr}, current time: ${timeStr}
+
+# Work Goals
+${state.workGoals.length > 0 ? state.workGoals.map((g, i) => `${i+1}. ${g}`).join('\n') : 'None specified'}
+
+# Personal Goals
+${state.personalGoals.length > 0 ? state.personalGoals.map((g, i) => `${i+1}. ${g}`).join('\n') : 'None specified'}
+
+# Calendar Events Today
+${state.events.length > 0 ? state.events.map(e => `- [${e.type}] ${e.start}${e.end ? ' – '+e.end : ''}: ${e.title}${e.notes ? ' ('+e.notes+')' : ''}`).join('\n') : 'No events scheduled'}
+
+# Today's Context / Special Notes
+${dailyContext || 'None provided'}
+
+# Instructions
+Create a complete, time-blocked daily schedule from ${state.workStart} to ${state.workEnd}. 
+
+Apply these principles:
+- Schedule focused deep work during peak cognitive hours (typically morning)
+- Respect all existing calendar events — work around them
+- Allocate specific time blocks to advance both work AND personal goals
+- Include short breaks (5-10 min) after every 90 min of focus work
+- Include a proper lunch break
+- Cluster admin tasks, email, and communication in dedicated batches
+- End the day with a wind-down/planning block for tomorrow
+- Be realistic about what can fit in one day — be selective, not exhaustive
+
+Return ONLY a JSON array. No preamble, no explanation, no markdown fences. Just the raw JSON array.
+
+Each object must have these exact fields:
+{
+  "time": "9:00 AM",
+  "duration": "90 min",
+  "title": "Deep Work: Feature Spec",
+  "description": "Draft the technical specification for the new auth flow. Focus on edge cases.",
+  "type": "focus" | "break" | "personal" | "admin" | "meeting",
+  "goal_ref": "Optional: which goal this advances"
+}`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': state.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4096,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error?.message || response.statusText);
+    }
+
+    const data = await response.json();
+    let text = data.content?.[0]?.text || '';
+
+    // Strip any markdown fences
+    text = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+
+    let blocks;
+    try {
+      blocks = JSON.parse(text);
+    } catch(e) {
+      // Try to extract JSON array
+      const match = text.match(/\[[\s\S]*\]/);
+      if (match) blocks = JSON.parse(match[0]);
+      else throw new Error('Could not parse schedule JSON from response.');
+    }
+
+    renderSchedule(blocks);
+  } catch (err) {
+    output.innerHTML = `
+      <div style="border:1px solid var(--red);padding:1rem;font-family:var(--font-mono);font-size:0.7rem;color:var(--red);">
+        Error: ${escapeHtml(err.message)}
+      </div>`;
+    showToast('Failed to generate schedule. Check your API key.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '◈   Rebuild My Day';
+  }
+}
+
+function renderSchedule(blocks) {
+  const typeLabels = {
+    focus: 'Deep Focus',
+    break: 'Break',
+    personal: 'Personal',
+    admin: 'Admin',
+    meeting: 'Meeting'
+  };
+
+  const output = document.getElementById('schedule-output');
+  output.innerHTML = blocks.map((b, i) => `
+    <div class="schedule-block ${b.type || 'admin'}" style="animation-delay:${i * 60}ms">
+      <div class="block-time">${escapeHtml(b.time || '')}${b.duration ? ' · ' + escapeHtml(b.duration) : ''}</div>
+      <div class="block-title">${escapeHtml(b.title || '')}</div>
+      ${b.description ? `<div class="block-desc">${escapeHtml(b.description)}</div>` : ''}
+      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <span class="block-tag">${typeLabels[b.type] || b.type || 'Task'}</span>
+        ${b.goal_ref ? `<span style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);margin-top:0.4rem;">↳ ${escapeHtml(b.goal_ref)}</span>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  showToast('Your schedule is ready.');
+}
+
+// ──────────────────────────────────────────────
+// UTILITIES
+// ──────────────────────────────────────────────
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+let toastTimer;
+function showToast(msg) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  clearTimeout(toastTimer);
+
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+
+  toastTimer = setTimeout(() => el.remove(), 3500);
+}
+
+// ──────────────────────────────────────────────
+// START
+// ──────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
