@@ -10,7 +10,7 @@ compatibility_date = "2024-01-01"
 [[d1_databases]]
 binding     = "DB"
 database_name = "meridian-db"
-database_id   = "YOUR_DATABASE_ID"
+database_id   = "7d31e45f-4109-4d39-8106-7a3b9a334449"
 
 # Environment variables are set in the Cloudflare dashboard or via:
 #   npx wrangler secret put AUTH_TOKEN
