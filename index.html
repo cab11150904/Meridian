@@ -865,32 +865,10 @@
     <div class="setup-tagline">Daily Intelligence Assistant</div>
 
     <div class="setup-section">
-      <h3>Anthropic API</h3>
-      <label>API Key (required)</label>
-      <input type="password" id="setup-api-key" placeholder="sk-ant-api03-..." />
-      <div class="hint">Your key is stored locally in your browser and never sent anywhere except Anthropic. <a href="https://console.anthropic.com" target="_blank">Get one here →</a></div>
-    </div>
-
-    <div class="setup-section">
-      <h3>Google Calendar <span style="color:var(--text-dim);font-size:0.55rem;">(optional)</span></h3>
-      <label>OAuth Client ID</label>
-      <input type="text" id="setup-gcal-client" placeholder="123456789-xxx.apps.googleusercontent.com" />
-      <label>API Key</label>
-      <input type="text" id="setup-gcal-apikey" placeholder="AIzaSy..." />
-      <div class="hint">Leave blank to add calendar events manually. To enable Google Calendar, create a project at <a href="https://console.cloud.google.com" target="_blank">Google Cloud Console →</a>, enable the Calendar API, and create OAuth 2.0 credentials. Set your domain as an authorized JavaScript origin.</div>
-    </div>
-
-    <div class="setup-section">
-      <h3>Your Profile</h3>
-      <label>Name</label>
-      <input type="text" id="setup-name" placeholder="e.g. Alex" />
-      <label>Role / Context</label>
-      <input type="text" id="setup-role" placeholder="e.g. Product Manager at a tech startup" />
-      <label>Work Hours</label>
-      <div class="form-row" style="margin-bottom:1rem;">
-        <input type="text" id="setup-start" placeholder="Start: 9:00 AM" style="margin-bottom:0;" />
-        <input type="text" id="setup-end" placeholder="End: 6:00 PM" style="margin-bottom:0;" />
-      </div>
+      <h3>Authentication</h3>
+      <label>Access Token</label>
+      <input type="password" id="setup-auth-token" placeholder="Your AUTH_TOKEN secret..." />
+      <div class="hint">Enter the <code style="color:var(--amber);font-family:var(--font-mono);">AUTH_TOKEN</code> you set as a Cloudflare secret. This authenticates you to your own backend — your Anthropic API key lives there, never in the browser.</div>
     </div>
 
     <button class="primary" onclick="completeSetup()">Enter Meridian →</button>
@@ -1038,9 +1016,7 @@
   <div class="modal">
     <button class="modal-close" onclick="closeSettings()">✕</button>
     <h3>Settings</h3>
-    <p>Update your configuration. Changes are saved to localStorage.</p>
-    <label>Anthropic API Key</label>
-    <input type="password" id="s-apikey" />
+    <p>Profile and preferences are stored in D1. Your Anthropic API key and Google credentials live in Cloudflare secrets — never in the browser.</p>
     <label>Your Name</label>
     <input type="text" id="s-name" />
     <label>Role / Context</label>
@@ -1049,84 +1025,138 @@
     <input type="text" id="s-start" />
     <label>Work End Time</label>
     <input type="text" id="s-end" />
-    <div style="height:1px;background:var(--border);margin:0.75rem 0;"></div>
-    <div style="font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.2em;color:var(--amber);margin-bottom:1rem;text-transform:uppercase;">Google Calendar</div>
-    <label>OAuth Client ID</label>
-    <input type="text" id="s-gcal-client" placeholder="123456789-xxx.apps.googleusercontent.com" />
-    <label>API Key</label>
-    <input type="text" id="s-gcal-apikey" placeholder="AIzaSy..." />
     <button class="primary" onclick="saveSettings()">Save Settings</button>
   </div>
 </div>
 
-<!-- GAPI Script (loaded dynamically) -->
 <script>
-// ──────────────────────────────────────────────
-// STATE
-// ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// MERIDIAN — D1-backed frontend
+// All data (goals, events, settings) is stored in Cloudflare D1 via the
+// Pages Functions API. The Anthropic API key never touches the browser.
+// Google Calendar OAuth still runs client-side (it must, by design).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Auth & API ─────────────────────────────────────────────────────────────
+let authToken = localStorage.getItem('meridian_auth') || '';
+
+async function api(path, method = 'GET', body = null) {
+  const opts = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${authToken}`,
+    },
+  };
+  if (body !== null) opts.body = JSON.stringify(body);
+  const res = await fetch(`/api/${path}`, opts);
+  if (res.status === 401) {
+    // Token rejected — boot back to setup
+    authToken = '';
+    localStorage.removeItem('meridian_auth');
+    location.reload();
+    throw new Error('Unauthorized');
+  }
+  return res.json();
+}
+
+// ── In-memory state (no localStorage for data) ─────────────────────────────
 let state = {
-  apiKey: '',
-  gcalClientId: '',
-  gcalApiKey: '',
   name: '',
   role: '',
   workStart: '9:00 AM',
   workEnd: '6:00 PM',
-  workGoals: [],
-  personalGoals: [],
-  events: [],
+  gcalClientId: '',       // fetched from /api/config (server env var)
+  gcalToken: localStorage.getItem('meridian_gcal_token') || null,
+  gcalTokenExpiry: parseInt(localStorage.getItem('meridian_gcal_expiry') || '0'),
   gcalConnected: false,
-  gcalToken: null,
-  gcalTokenExpiry: 0
+  goals: [],              // [{ id, text, type }]
+  events: [],             // [{ id, title, start_time, end_time, type, notes, source }]
 };
 
-// ──────────────────────────────────────────────
-// INIT
-// ──────────────────────────────────────────────
-function init() {
-  const saved = localStorage.getItem('meridian_state');
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      state = { ...state, ...parsed };
-    } catch(e) {}
-  }
-
-  // Reset live connection state — will be re-established by silentReconnect
-  state.gcalConnected = false;
-
-  if (state.apiKey) {
-    showApp();
-  }
-
-  // Set date
+// ── INIT ───────────────────────────────────────────────────────────────────
+async function init() {
   const now = new Date();
-  const opts = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' };
-  document.getElementById('header-date').textContent = now.toLocaleDateString('en-US', opts);
-}
+  document.getElementById('header-date').textContent =
+    now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
-function saveState() {
-  localStorage.setItem('meridian_state', JSON.stringify(state));
-}
-
-// ──────────────────────────────────────────────
-// SETUP
-// ──────────────────────────────────────────────
-function completeSetup() {
-  const apiKey = document.getElementById('setup-api-key').value.trim();
-  if (!apiKey) {
-    showToast('Please enter your Anthropic API key.');
+  if (!authToken) {
+    // Show setup screen
     return;
   }
-  state.apiKey = apiKey;
-  state.gcalClientId = document.getElementById('setup-gcal-client').value.trim();
-  state.gcalApiKey = document.getElementById('setup-gcal-apikey').value.trim();
-  state.name = document.getElementById('setup-name').value.trim() || 'there';
-  state.role = document.getElementById('setup-role').value.trim();
-  state.workStart = document.getElementById('setup-start').value.trim() || '9:00 AM';
-  state.workEnd = document.getElementById('setup-end').value.trim() || '6:00 PM';
-  saveState();
-  showApp();
+
+  // Verify token works + bootstrap data
+  try {
+    await bootstrap();
+    showApp();
+  } catch(e) {
+    if (e.message !== 'Unauthorized') {
+      showToast('Failed to load data: ' + e.message);
+    }
+  }
+}
+
+async function bootstrap() {
+  // Load in parallel: config, settings, goals, events
+  const [config, settings, goals, events] = await Promise.all([
+    fetch('/api/config').then(r => r.json()),   // public — no auth
+    api('settings'),
+    api('goals'),
+    api('events'),
+  ]);
+
+  // Config (from Cloudflare env vars)
+  state.gcalClientId = config.gcalClientId || '';
+
+  // Settings
+  state.name      = settings.name      || '';
+  state.role      = settings.role      || '';
+  state.workStart = settings.workStart || '9:00 AM';
+  state.workEnd   = settings.workEnd   || '6:00 PM';
+
+  // Goals
+  state.goals = goals;
+
+  // Events — normalise field names (DB uses start_time, UI uses start)
+  state.events = events.map(normaliseEvent);
+}
+
+function normaliseEvent(e) {
+  return {
+    id:     e.id,
+    title:  e.title,
+    start:  e.start_time || e.start || '',
+    end:    e.end_time   || e.end   || '',
+    type:   e.type   || 'work',
+    notes:  e.notes  || '',
+    source: e.source || 'manual',
+  };
+}
+
+// ── SETUP ──────────────────────────────────────────────────────────────────
+async function completeSetup() {
+  const token = document.getElementById('setup-auth-token').value.trim();
+  if (!token) { showToast('Please enter your access token.'); return; }
+
+  const btn = document.querySelector('#setup-screen .primary');
+  btn.disabled = true;
+  btn.textContent = 'Verifying...';
+
+  // Test token by calling /api/settings
+  try {
+    const res = await fetch('/api/settings', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) throw new Error('Token rejected — check your AUTH_TOKEN secret.');
+    authToken = token;
+    localStorage.setItem('meridian_auth', token);
+    await bootstrap();
+    showApp();
+  } catch(e) {
+    showToast(e.message || 'Could not connect to backend.');
+    btn.disabled = false;
+    btn.textContent = 'Enter Meridian →';
+  }
 }
 
 function showApp() {
@@ -1135,23 +1165,15 @@ function showApp() {
   renderGoals();
   renderEvents();
   updateStats();
-  // If we have a saved token and Calendar credentials, try to silently reconnect
-  if (state.gcalClientId && state.gcalToken) {
-    silentReconnect();
-  }
+  if (state.gcalClientId && state.gcalToken) silentReconnect();
 }
 
-// ──────────────────────────────────────────────
-// SETTINGS MODAL
-// ──────────────────────────────────────────────
+// ── SETTINGS MODAL ─────────────────────────────────────────────────────────
 function openSettings() {
-  document.getElementById('s-apikey').value = state.apiKey;
-  document.getElementById('s-name').value = state.name;
-  document.getElementById('s-role').value = state.role;
+  document.getElementById('s-name').value  = state.name;
+  document.getElementById('s-role').value  = state.role;
   document.getElementById('s-start').value = state.workStart;
-  document.getElementById('s-end').value = state.workEnd;
-  document.getElementById('s-gcal-client').value = state.gcalClientId || '';
-  document.getElementById('s-gcal-apikey').value = state.gcalApiKey || '';
+  document.getElementById('s-end').value   = state.workEnd;
   document.getElementById('settings-modal').classList.add('open');
 }
 
@@ -1159,56 +1181,56 @@ function closeSettings() {
   document.getElementById('settings-modal').classList.remove('open');
 }
 
-function saveSettings() {
-  state.apiKey = document.getElementById('s-apikey').value.trim();
-  state.name = document.getElementById('s-name').value.trim() || state.name;
-  state.role = document.getElementById('s-role').value.trim();
+async function saveSettings() {
+  state.name      = document.getElementById('s-name').value.trim()  || state.name;
+  state.role      = document.getElementById('s-role').value.trim();
   state.workStart = document.getElementById('s-start').value.trim() || state.workStart;
-  state.workEnd = document.getElementById('s-end').value.trim() || state.workEnd;
-  const newClientId = document.getElementById('s-gcal-client').value.trim();
-  const newApiKey = document.getElementById('s-gcal-apikey').value.trim();
-  // If credentials changed, reset gapi so it re-initializes with new values
-  if (newClientId !== state.gcalClientId || newApiKey !== state.gcalApiKey) {
-    gapiInitialized = false;
-    tokenClient = null;
-    resetGcalBtn();
+  state.workEnd   = document.getElementById('s-end').value.trim()   || state.workEnd;
+
+  try {
+    await api('settings', 'PUT', {
+      name: state.name, role: state.role,
+      workStart: state.workStart, workEnd: state.workEnd,
+    });
+    closeSettings();
+    showToast('Settings saved to D1.');
+  } catch(e) {
+    showToast('Failed to save settings: ' + e.message);
   }
-  state.gcalClientId = newClientId;
-  state.gcalApiKey = newApiKey;
-  saveState();
-  closeSettings();
-  showToast('Settings saved.');
 }
 
-// ──────────────────────────────────────────────
-// GOALS
-// ──────────────────────────────────────────────
-function addGoal(type) {
+// ── GOALS ──────────────────────────────────────────────────────────────────
+async function addGoal(type) {
   const inputId = type === 'work' ? 'new-work-goal' : 'new-personal-goal';
-  const input = document.getElementById(inputId);
-  const text = input.value.trim();
+  const input   = document.getElementById(inputId);
+  const text    = input.value.trim();
   if (!text) return;
 
-  if (type === 'work') state.workGoals.push(text);
-  else state.personalGoals.push(text);
-
-  input.value = '';
-  saveState();
-  renderGoals();
-  updateStats();
+  try {
+    const newGoal = await api('goals', 'POST', { text, type });
+    state.goals.push(newGoal);
+    input.value = '';
+    renderGoals();
+    updateStats();
+  } catch(e) {
+    showToast('Failed to add goal: ' + e.message);
+  }
 }
 
-function removeGoal(type, idx) {
-  if (type === 'work') state.workGoals.splice(idx, 1);
-  else state.personalGoals.splice(idx, 1);
-  saveState();
-  renderGoals();
-  updateStats();
+async function removeGoal(id) {
+  try {
+    await api(`goals/${id}`, 'DELETE');
+    state.goals = state.goals.filter(g => g.id !== id);
+    renderGoals();
+    updateStats();
+  } catch(e) {
+    showToast('Failed to remove goal: ' + e.message);
+  }
 }
 
 function renderGoals() {
-  renderGoalList('work-goals-list', state.workGoals, 'work');
-  renderGoalList('personal-goals-list', state.personalGoals, 'personal');
+  renderGoalList('work-goals-list',     state.goals.filter(g => g.type === 'work'),     'work');
+  renderGoalList('personal-goals-list', state.goals.filter(g => g.type === 'personal'), 'personal');
 }
 
 function renderGoalList(containerId, goals, type) {
@@ -1217,55 +1239,57 @@ function renderGoalList(containerId, goals, type) {
     container.innerHTML = `<div style="font-size:0.75rem;color:var(--text-dim);padding:0.5rem 0;font-family:var(--font-mono);">No ${type} goals yet.</div>`;
     return;
   }
-  container.innerHTML = goals.map((g, i) => `
+  container.innerHTML = goals.map(g => `
     <div class="goal-item ${type}">
       <div class="goal-marker"></div>
-      <div class="goal-text">${escapeHtml(g)}</div>
-      <button class="goal-delete" onclick="removeGoal('${type}', ${i})">✕</button>
+      <div class="goal-text">${escapeHtml(g.text)}</div>
+      <button class="goal-delete" onclick="removeGoal(${g.id})">✕</button>
     </div>
   `).join('');
 }
 
-// ──────────────────────────────────────────────
-// EVENTS
-// ──────────────────────────────────────────────
+// ── EVENTS ─────────────────────────────────────────────────────────────────
 function toggleAddEvent() {
   const form = document.getElementById('add-event-form');
-  const btn = document.getElementById('add-event-btn');
+  const btn  = document.getElementById('add-event-btn');
   const visible = form.style.display !== 'none';
   form.style.display = visible ? 'none' : 'block';
   btn.textContent = visible ? '+ Add' : '✕ Close';
 }
 
-function addEvent() {
+async function addEvent() {
   const title = document.getElementById('evt-title').value.trim();
   const start = document.getElementById('evt-start').value.trim();
-  const end = document.getElementById('evt-end').value.trim();
-  const type = document.getElementById('evt-type').value;
+  const end   = document.getElementById('evt-end').value.trim();
+  const type  = document.getElementById('evt-type').value;
   const notes = document.getElementById('evt-notes').value.trim();
 
-  if (!title || !start) {
-    showToast('Title and start time are required.');
-    return;
+  if (!title || !start) { showToast('Title and start time are required.'); return; }
+
+  try {
+    const newEvt = await api('events', 'POST', { title, start, end, type, notes, source: 'manual' });
+    state.events.push(normaliseEvent(newEvt));
+    renderEvents();
+    updateStats();
+    document.getElementById('evt-title').value = '';
+    document.getElementById('evt-start').value = '';
+    document.getElementById('evt-end').value   = '';
+    document.getElementById('evt-notes').value = '';
+    toggleAddEvent();
+  } catch(e) {
+    showToast('Failed to add event: ' + e.message);
   }
-
-  state.events.push({ title, start, end, type, notes, source: 'manual' });
-  saveState();
-  renderEvents();
-  updateStats();
-
-  document.getElementById('evt-title').value = '';
-  document.getElementById('evt-start').value = '';
-  document.getElementById('evt-end').value = '';
-  document.getElementById('evt-notes').value = '';
-  toggleAddEvent();
 }
 
-function removeEvent(idx) {
-  state.events.splice(idx, 1);
-  saveState();
-  renderEvents();
-  updateStats();
+async function removeEvent(id) {
+  try {
+    await api(`events/${id}`, 'DELETE');
+    state.events = state.events.filter(e => e.id !== id);
+    renderEvents();
+    updateStats();
+  } catch(e) {
+    showToast('Failed to remove event: ' + e.message);
+  }
 }
 
 function renderEvents() {
@@ -1278,13 +1302,9 @@ function renderEvents() {
       </div>`;
     return;
   }
-
-  // Sort by start time
-  const sorted = [...state.events].map((e, i) => ({ ...e, _idx: i }));
-
-  container.innerHTML = sorted.map(evt => `
+  container.innerHTML = state.events.map(evt => `
     <div class="event-item ${evt.type}">
-      <button class="event-delete" onclick="removeEvent(${evt._idx})">✕</button>
+      <button class="event-delete" onclick="removeEvent(${evt.id})">✕</button>
       <div class="event-time">${escapeHtml(evt.start)}${evt.end ? ' – ' + escapeHtml(evt.end) : ''} · ${evt.type}</div>
       <div class="event-title">${escapeHtml(evt.title)}</div>
       ${evt.notes ? `<div class="event-meta">${escapeHtml(evt.notes)}</div>` : ''}
@@ -1294,240 +1314,33 @@ function renderEvents() {
 }
 
 function updateStats() {
-  document.getElementById('stat-work').textContent = state.workGoals.length;
-  document.getElementById('stat-personal').textContent = state.personalGoals.length;
-  document.getElementById('stat-events').textContent = state.events.length;
+  document.getElementById('stat-work').textContent     = state.goals.filter(g => g.type === 'work').length;
+  document.getElementById('stat-personal').textContent = state.goals.filter(g => g.type === 'personal').length;
+  document.getElementById('stat-events').textContent   = state.events.length;
 }
 
-// ──────────────────────────────────────────────
-// GOOGLE CALENDAR
-// ──────────────────────────────────────────────
-let tokenClient = null;
+// ── GOOGLE CALENDAR ────────────────────────────────────────────────────────
+let tokenClient    = null;
 let gapiInitialized = false;
 let autoRefreshTimer = null;
-const REFRESH_INTERVAL_MS = 5 * 60 * 1000;   // fetch new events every 5 min
-const TOKEN_REFRESH_BUFFER = 5 * 60 * 1000;   // renew token 5 min before expiry
-
-// ── Silent reconnect on page load ──────────────────
-async function silentReconnect() {
-  try {
-    await loadScript('https://apis.google.com/js/api.js');
-    await loadScript('https://accounts.google.com/gsi/client');
-    if (!gapiInitialized) await initGapiClient();
-
-    // Restore saved token onto gapi.client
-    gapi.client.setToken({ access_token: state.gcalToken });
-
-    // Check if token is still valid (with buffer)
-    if (state.gcalTokenExpiry - Date.now() > TOKEN_REFRESH_BUFFER) {
-      await fetchCalendarEvents();
-      setGcalConnectedUI();
-      scheduleTokenRenewal();
-      startAutoRefresh();
-    } else {
-      // Token expired — get a fresh one silently (no popup if previously consented)
-      await silentTokenRenew();
-    }
-  } catch(e) {
-    console.warn('[Meridian] Silent reconnect failed:', e.message || e);
-    // Don't show an error — just leave the connect button available
-  }
-}
-
-// ── Silent token renewal (no consent prompt) ───────
-function silentTokenRenew() {
-  return new Promise((resolve, reject) => {
-    if (!tokenClient) {
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: state.gcalClientId,
-        scope: 'https://www.googleapis.com/auth/calendar.readonly',
-        callback: async (resp) => {
-          if (resp.error) { reject(new Error(resp.error)); return; }
-          await onTokenReceived(resp);
-          resolve();
-        },
-        error_callback: (e) => reject(new Error(errStr(e))),
-      });
-    }
-    // prompt: '' means silent if previously consented, popup if not
-    tokenClient.requestAccessToken({ prompt: '' });
-  });
-}
-
-// ── Schedule token renewal before expiry ───────────
-function scheduleTokenRenewal() {
-  const msUntilRenew = (state.gcalTokenExpiry - Date.now()) - TOKEN_REFRESH_BUFFER;
-  if (msUntilRenew > 0) {
-    setTimeout(() => {
-      console.log('[Meridian] Proactively renewing OAuth token...');
-      silentTokenRenew().catch(e => console.warn('[Meridian] Token renewal failed:', e));
-    }, msUntilRenew);
-  }
-}
-
-// ── Auto-refresh calendar events ───────────────────
-function startAutoRefresh() {
-  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-  autoRefreshTimer = setInterval(async () => {
-    if (!state.gcalConnected) return;
-    console.log('[Meridian] Auto-refreshing calendar events...');
-    try {
-      // Renew token first if close to expiry
-      if (state.gcalTokenExpiry - Date.now() < TOKEN_REFRESH_BUFFER) {
-        await silentTokenRenew();
-      }
-      await fetchCalendarEvents();
-      updateLastSyncUI();
-      resetCountdown();
-    } catch(e) {
-      console.warn('[Meridian] Auto-refresh failed:', e);
-    }
-  }, REFRESH_INTERVAL_MS);
-  console.log('[Meridian] Auto-refresh started (every 5 min).');
-}
-
-// ── Shared: store token + expiry ───────────────────
-async function onTokenReceived(resp) {
-  const expiresIn = parseInt(resp.expires_in || 3600);
-  state.gcalToken = resp.access_token;
-  state.gcalTokenExpiry = Date.now() + expiresIn * 1000;
-  gapi.client.setToken({ access_token: resp.access_token });
-  saveState();
-  await fetchCalendarEvents();
-  setGcalConnectedUI();
-  scheduleTokenRenewal();
-  startAutoRefresh();
-}
-
-// ── Fetch today's events (extracted for reuse) ─────
-async function fetchCalendarEvents() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const response = await gapi.client.calendar.events.list({
-    calendarId: 'primary',
-    timeMin: today.toISOString(),
-    timeMax: tomorrow.toISOString(),
-    singleEvents: true,
-    orderBy: 'startTime',
-  });
-
-  const items = response.result.items || [];
-  state.events = state.events.filter(e => e.source !== 'gcal');
-
-  items.forEach(item => {
-    const startDt = item.start.dateTime || item.start.date;
-    const endDt = item.end?.dateTime || item.end?.date;
-    const fmt = (dt) => {
-      if (!dt) return '';
-      const d = new Date(dt);
-      if (isNaN(d)) return dt;
-      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    };
-    state.events.push({
-      title: item.summary || 'Untitled event',
-      start: fmt(startDt),
-      end: fmt(endDt),
-      type: 'work',
-      notes: item.description || '',
-      source: 'gcal'
-    });
-  });
-
-  saveState();
-  renderEvents();
-  updateStats();
-  return items.length;
-}
-
-// ── Update button to connected state ───────────────
-let countdownTimer = null;
-let nextRefreshAt = 0;
-
-function setGcalConnectedUI() {
-  state.gcalConnected = true;
-  const btn = document.getElementById('gcal-btn');
-  btn.classList.add('connected');
-  btn.style.pointerEvents = '';
-  btn.onclick = () => {
-    // Manual refresh — reset the countdown
-    fetchCalendarEvents()
-      .then(n => { showToast(`Refreshed — ${n} events today.`); resetCountdown(); })
-      .catch(() => {});
-  };
-  updateLastSyncUI();
-  resetCountdown();
-}
-
-function manualRefresh() {
-  if (!state.gcalConnected) { showToast('Calendar not connected.'); return; }
-  const icon = document.getElementById('refresh-icon');
-  const btn = document.getElementById('manual-refresh-btn');
-  if (btn) btn.style.pointerEvents = 'none';
-  if (icon) icon.style.animation = 'spin 0.7s linear infinite';
-  fetchCalendarEvents()
-    .then(n => { showToast(`Refreshed — ${n} events today.`); resetCountdown(); })
-    .catch(e => showToast('Refresh failed: ' + (e.message || e)))
-    .finally(() => {
-      if (icon) icon.style.animation = '';
-      if (btn) btn.style.pointerEvents = '';
-    });
-}
-
-function resetCountdown() {
-  nextRefreshAt = Date.now() + REFRESH_INTERVAL_MS;
-  if (countdownTimer) clearInterval(countdownTimer);
-  countdownTimer = setInterval(tickCountdown, 1000);
-}
-
-function tickCountdown() {
-  if (!state.gcalConnected) { clearInterval(countdownTimer); return; }
-  const el = document.getElementById('gcal-countdown');
-  if (!el) return;
-  const secsLeft = Math.max(0, Math.round((nextRefreshAt - Date.now()) / 1000));
-  const m = Math.floor(secsLeft / 60);
-  const s = secsLeft % 60;
-  const label = secsLeft === 0 ? 'refreshing…' : `${m}:${String(s).padStart(2,'0')}`;
-  // Pulse the dot when under 10s
-  const dot = document.getElementById('gcal-status-dot');
-  if (dot) dot.style.opacity = secsLeft <= 10 && secsLeft % 2 === 0 ? '0.3' : '1';
-  el.textContent = label;
-}
-
-function updateLastSyncUI() {
-  const now = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  const btn = document.getElementById('gcal-btn');
-  const count = state.events.filter(e => e.source === 'gcal').length;
-  btn.innerHTML = `
-    <span id="gcal-status-dot" class="status-dot"></span>
-    <span>${count} event${count !== 1 ? 's' : ''} · synced ${now}</span>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:0.35rem;opacity:0.45;font-size:0.55rem;">
-      next <span id="gcal-countdown" style="font-variant-numeric:tabular-nums;min-width:2.2rem;text-align:right;">5:00</span>
-    </span>`;
-  // Make the button a flex row so the countdown sits on the right
-  btn.style.display = 'flex';
-  btn.style.justifyContent = 'flex-start';
-  btn.style.gap = '0.5rem';
-}
+let countdownTimer   = null;
+let nextRefreshAt    = 0;
+const REFRESH_INTERVAL_MS  = 5 * 60 * 1000;
+const TOKEN_REFRESH_BUFFER = 5 * 60 * 1000;
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve();
-      return;
-    }
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
     const s = document.createElement('script');
     s.src = src;
     s.onload = () => { console.log('[Meridian] Loaded:', src); resolve(); };
-    s.onerror = (e) => reject(new Error('Network blocked loading: ' + src));
+    s.onerror = () => reject(new Error('Network blocked loading: ' + src));
     document.head.appendChild(s);
   });
 }
 
 function errStr(e) {
-  if (!e) return 'Unknown error (null)';
+  if (!e) return 'Unknown error';
   if (typeof e === 'string') return e;
   if (e.message) return e.message;
   if (e.details) return e.details;
@@ -1536,7 +1349,7 @@ function errStr(e) {
 }
 
 async function initGapiClient() {
-  console.log('[Meridian] Loading gapi client library...');
+  console.log('[Meridian] Loading gapi client...');
   await new Promise((resolve, reject) => {
     gapi.load('client', {
       callback: resolve,
@@ -1545,71 +1358,155 @@ async function initGapiClient() {
       ontimeout: () => reject(new Error('gapi.load timed out')),
     });
   });
-
   console.log('[Meridian] Initializing gapi client...');
   try {
-    // API key is optional when using OAuth — only include if the user provided one
-    const initConfig = {
-      discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
-    };
+    const initConfig = { discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'] };
     if (state.gcalApiKey) initConfig.apiKey = state.gcalApiKey;
     await gapi.client.init(initConfig);
   } catch(e) {
     const msg = errStr(e);
     if (msg.includes('API key not valid') || msg.includes('API_KEY_INVALID') || msg.includes('INVALID_ARGUMENT')) {
-      throw new Error('Invalid API Key. You can clear the API Key field in Settings — it is optional when using OAuth. Only your OAuth Client ID is required.');
+      throw new Error('Invalid API Key. Leave the API Key field blank — only the OAuth Client ID is required.');
     }
     if (msg.includes('idpiframe') || msg.includes('Not a valid origin')) {
-      throw new Error('Origin not authorized. Add "' + location.origin + '" to your OAuth client\'s allowed origins in Google Cloud Console.');
+      throw new Error('Origin not authorized. Add "' + location.origin + '" to your OAuth client\'s allowed origins.');
     }
     throw new Error('gapi.client.init failed: ' + msg);
   }
-
   gapiInitialized = true;
   console.log('[Meridian] gapi client ready.');
 }
 
-async function connectGoogleCalendar() {
-  if (!state.gcalClientId) {
-    showToast('No OAuth Client ID found. Open Settings and add your Google OAuth Client ID.');
-    return;
+async function silentReconnect() {
+  try {
+    await loadScript('https://apis.google.com/js/api.js');
+    await loadScript('https://accounts.google.com/gsi/client');
+    if (!gapiInitialized) await initGapiClient();
+    gapi.client.setToken({ access_token: state.gcalToken });
+    if (state.gcalTokenExpiry - Date.now() > TOKEN_REFRESH_BUFFER) {
+      await fetchCalendarEvents();
+      setGcalConnectedUI();
+      scheduleTokenRenewal();
+      startAutoRefresh();
+    } else {
+      await silentTokenRenew();
+    }
+  } catch(e) {
+    console.warn('[Meridian] Silent reconnect failed:', errStr(e));
+  }
+}
+
+function silentTokenRenew() {
+  return new Promise((resolve, reject) => {
+    if (!tokenClient) {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: state.gcalClientId,
+        scope: 'https://www.googleapis.com/auth/calendar.readonly',
+        callback: async (resp) => {
+          if (resp.error) { reject(new Error(resp.error)); return; }
+          await onTokenReceived(resp); resolve();
+        },
+        error_callback: (e) => reject(new Error(errStr(e))),
+      });
+    }
+    tokenClient.requestAccessToken({ prompt: '' });
+  });
+}
+
+function scheduleTokenRenewal() {
+  const ms = (state.gcalTokenExpiry - Date.now()) - TOKEN_REFRESH_BUFFER;
+  if (ms > 0) setTimeout(() => silentTokenRenew().catch(() => {}), ms);
+}
+
+function startAutoRefresh() {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(async () => {
+    if (!state.gcalConnected) return;
+    try {
+      if (state.gcalTokenExpiry - Date.now() < TOKEN_REFRESH_BUFFER) await silentTokenRenew();
+      await fetchCalendarEvents();
+      updateLastSyncUI();
+      resetCountdown();
+    } catch(e) { console.warn('[Meridian] Auto-refresh failed:', e); }
+  }, REFRESH_INTERVAL_MS);
+}
+
+async function onTokenReceived(resp) {
+  const expiresIn = parseInt(resp.expires_in || 3600);
+  state.gcalToken       = resp.access_token;
+  state.gcalTokenExpiry = Date.now() + expiresIn * 1000;
+  // Persist token for page reloads
+  localStorage.setItem('meridian_gcal_token',  state.gcalToken);
+  localStorage.setItem('meridian_gcal_expiry', state.gcalTokenExpiry);
+  gapi.client.setToken({ access_token: resp.access_token });
+  await fetchCalendarEvents();
+  setGcalConnectedUI();
+  scheduleTokenRenewal();
+  startAutoRefresh();
+}
+
+// Fetch from Google, DELETE old gcal events from D1, POST new ones
+async function fetchCalendarEvents() {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const response = await gapi.client.calendar.events.list({
+    calendarId: 'primary',
+    timeMin: today.toISOString(),
+    timeMax: tomorrow.toISOString(),
+    singleEvents: true,
+    orderBy: 'startTime',
+  });
+  const items = response.result.items || [];
+  const fmt = (dt) => {
+    if (!dt) return '';
+    const d = new Date(dt);
+    return isNaN(d) ? dt : d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  };
+
+  // Wipe existing gcal events in D1, then re-insert
+  await api('events?source=gcal', 'DELETE');
+  state.events = state.events.filter(e => e.source !== 'gcal');
+
+  for (const item of items) {
+    const payload = {
+      title:  item.summary || 'Untitled event',
+      start:  fmt(item.start.dateTime || item.start.date),
+      end:    fmt(item.end?.dateTime  || item.end?.date),
+      type:   'work',
+      notes:  item.description || '',
+      source: 'gcal',
+    };
+    const saved = await api('events', 'POST', payload);
+    state.events.push(normaliseEvent({ ...payload, id: saved.id }));
   }
 
+  renderEvents();
+  updateStats();
+  return items.length;
+}
+
+async function connectGoogleCalendar() {
+  if (!state.gcalClientId) {
+    showToast('No Google OAuth Client ID configured. Set GCAL_CLIENT_ID in Cloudflare secrets.');
+    return;
+  }
   const btn = document.getElementById('gcal-btn');
   const setStatus = (msg) => {
     btn.style.pointerEvents = 'none';
     btn.innerHTML = `<span style="opacity:0.6;font-family:var(--font-mono);font-size:0.65rem;">${msg}</span>`;
   };
-
   setStatus('⏳ Loading Google scripts...');
-
   try {
     await loadScript('https://apis.google.com/js/api.js');
-    console.log('[Meridian] api.js loaded, gapi =', typeof gapi);
-  } catch(e) {
-    showGcalError(errStr(e) + ' — Check your internet connection or if a content blocker is active.');
-    return;
-  }
-
+  } catch(e) { showGcalError(errStr(e) + ' — Check your internet connection.'); return; }
   try {
     await loadScript('https://accounts.google.com/gsi/client');
-    console.log('[Meridian] gsi/client loaded, google =', typeof google);
-  } catch(e) {
-    showGcalError(errStr(e) + ' — Check your internet connection or if a content blocker is active.');
-    return;
-  }
-
+  } catch(e) { showGcalError(errStr(e) + ' — Check your internet connection.'); return; }
   setStatus('⏳ Initializing Calendar API...');
-
   try {
     if (!gapiInitialized) await initGapiClient();
-  } catch(e) {
-    showGcalError(errStr(e));
-    return;
-  }
-
+  } catch(e) { showGcalError(errStr(e)); return; }
   setStatus('⏳ Opening Google sign-in...');
-
   try {
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: state.gcalClientId,
@@ -1622,9 +1519,51 @@ async function connectGoogleCalendar() {
       error_callback: (e) => showGcalError('OAuth error: ' + errStr(e)),
     });
     tokenClient.requestAccessToken({ prompt: 'consent' });
-  } catch(e) {
-    showGcalError('Failed to open sign-in popup: ' + errStr(e));
-  }
+  } catch(e) { showGcalError('Failed to open sign-in popup: ' + errStr(e)); }
+}
+
+function setGcalConnectedUI() {
+  state.gcalConnected = true;
+  const btn = document.getElementById('gcal-btn');
+  btn.classList.add('connected');
+  btn.style.pointerEvents = '';
+  btn.onclick = () => {
+    fetchCalendarEvents().then(n => { showToast(`Refreshed — ${n} events today.`); resetCountdown(); }).catch(() => {});
+  };
+  updateLastSyncUI();
+  resetCountdown();
+}
+
+function resetCountdown() {
+  nextRefreshAt = Date.now() + REFRESH_INTERVAL_MS;
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = setInterval(tickCountdown, 1000);
+}
+
+function tickCountdown() {
+  if (!state.gcalConnected) { clearInterval(countdownTimer); return; }
+  const el  = document.getElementById('gcal-countdown');
+  if (!el) return;
+  const secsLeft = Math.max(0, Math.round((nextRefreshAt - Date.now()) / 1000));
+  const m = Math.floor(secsLeft / 60), s = secsLeft % 60;
+  el.textContent = secsLeft === 0 ? 'refreshing…' : `${m}:${String(s).padStart(2,'0')}`;
+  const dot = document.getElementById('gcal-status-dot');
+  if (dot) dot.style.opacity = secsLeft <= 10 && secsLeft % 2 === 0 ? '0.3' : '1';
+}
+
+function updateLastSyncUI() {
+  const now   = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const btn   = document.getElementById('gcal-btn');
+  const count = state.events.filter(e => e.source === 'gcal').length;
+  btn.innerHTML = `
+    <span id="gcal-status-dot" class="status-dot"></span>
+    <span>${count} event${count !== 1 ? 's' : ''} · synced ${now}</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:0.35rem;opacity:0.45;font-size:0.55rem;">
+      next <span id="gcal-countdown" style="font-variant-numeric:tabular-nums;min-width:2.2rem;text-align:right;">5:00</span>
+    </span>`;
+  btn.style.display = 'flex';
+  btn.style.justifyContent = 'flex-start';
+  btn.style.gap = '0.5rem';
 }
 
 function showGcalError(msg) {
@@ -1634,13 +1573,11 @@ function showGcalError(msg) {
   btn.style.borderColor = 'var(--red)';
   btn.style.color = 'var(--red)';
   btn.innerHTML = `⚠ ${msg}`;
-  // Also show a copy in the events area for longer messages
-  const container = document.getElementById('events-list');
-  container.innerHTML = `
+  document.getElementById('events-list').innerHTML = `
     <div style="border:1px solid var(--red);padding:1rem;font-family:var(--font-mono);font-size:0.7rem;color:var(--red);line-height:1.6;margin-top:0.5rem;">
       <strong>Google Calendar Error</strong><br><br>${msg}<br><br>
       <span style="color:var(--text-dim);">Your origin: <strong style="color:var(--cream);">${location.origin}</strong><br>
-      Make sure this is listed under Authorized JavaScript Origins in your OAuth 2.0 client at<br>
+      Add this to Authorized JavaScript Origins in your OAuth 2.0 client at<br>
       <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--amber);">console.cloud.google.com/apis/credentials</a></span>
     </div>`;
 }
@@ -1656,54 +1593,62 @@ function resetGcalBtn() {
   `;
 }
 
+function manualRefresh() {
+  if (!state.gcalConnected) { showToast('Calendar not connected.'); return; }
+  const icon = document.getElementById('refresh-icon');
+  const btn  = document.getElementById('manual-refresh-btn');
+  if (btn) btn.style.pointerEvents = 'none';
+  if (icon) icon.style.animation = 'spin 0.7s linear infinite';
+  fetchCalendarEvents()
+    .then(n => { showToast(`Refreshed — ${n} events today.`); resetCountdown(); })
+    .catch(e => showToast('Refresh failed: ' + (e.message || e)))
+    .finally(() => {
+      if (icon) icon.style.animation = '';
+      if (btn) btn.style.pointerEvents = '';
+    });
+}
 
-
-// ──────────────────────────────────────────────
-// GENERATE SCHEDULE (Claude API)
-// ──────────────────────────────────────────────
+// ── GENERATE SCHEDULE ──────────────────────────────────────────────────────
 async function generateSchedule() {
-  if (!state.apiKey) {
-    showToast('No API key configured. Open Settings.');
-    return;
-  }
-
-  const btn = document.getElementById('generate-btn');
+  const btn    = document.getElementById('generate-btn');
   const output = document.getElementById('schedule-output');
   const dailyContext = document.getElementById('daily-context').value.trim();
 
-  btn.disabled = true;
+  btn.disabled  = true;
   btn.textContent = '◈   Analyzing...';
   output.innerHTML = `
     <div class="loading-bar" style="width:100%;overflow:hidden;"></div>
-    <div class="loading-text">Meridian is building your day...</div>
-  `;
+    <div class="loading-text">Meridian is building your day...</div>`;
 
-  const today = new Date();
+  const today   = new Date();
   const dateStr = today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   const timeStr = today.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+  const workGoals     = state.goals.filter(g => g.type === 'work').map(g => g.text);
+  const personalGoals = state.goals.filter(g => g.type === 'personal').map(g => g.text);
 
   const prompt = `You are Meridian, an expert productivity assistant and daily planner. Your task is to create a detailed, realistic, and optimized daily schedule for today.
 
 # User Profile
-- Name: ${state.name}
+- Name: ${state.name || 'there'}
 - Role: ${state.role || 'Professional'}
 - Work Hours: ${state.workStart} to ${state.workEnd}
 - Today: ${dateStr}, current time: ${timeStr}
 
 # Work Goals
-${state.workGoals.length > 0 ? state.workGoals.map((g, i) => `${i+1}. ${g}`).join('\n') : 'None specified'}
+${workGoals.length > 0 ? workGoals.map((g, i) => `${i+1}. ${g}`).join('\n') : 'None specified'}
 
 # Personal Goals
-${state.personalGoals.length > 0 ? state.personalGoals.map((g, i) => `${i+1}. ${g}`).join('\n') : 'None specified'}
+${personalGoals.length > 0 ? personalGoals.map((g, i) => `${i+1}. ${g}`).join('\n') : 'None specified'}
 
 # Calendar Events Today
 ${state.events.length > 0 ? state.events.map(e => `- [${e.type}] ${e.start}${e.end ? ' – '+e.end : ''}: ${e.title}${e.notes ? ' ('+e.notes+')' : ''}`).join('\n') : 'No events scheduled'}
 
-# Today's Context / Special Notes
+# Today\'s Context / Special Notes
 ${dailyContext || 'None provided'}
 
 # Instructions
-Create a complete, time-blocked daily schedule from ${state.workStart} to ${state.workEnd}. 
+Create a complete, time-blocked daily schedule from ${state.workStart} to ${state.workEnd}.
 
 Apply these principles:
 - Schedule focused deep work during peak cognitive hours (typically morning)
@@ -1728,65 +1673,49 @@ Each object must have these exact fields:
 }`;
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': state.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        messages: [{ role: 'user', content: prompt }]
-      })
+    // Call through the Worker proxy — API key never touches the browser
+    const data = await api('generate', 'POST', {
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: prompt }],
     });
 
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error?.message || response.statusText);
-    }
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
 
-    const data = await response.json();
     let text = data.content?.[0]?.text || '';
-
-    // Strip any markdown fences
     text = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
 
     let blocks;
     try {
       blocks = JSON.parse(text);
     } catch(e) {
-      // Try to extract JSON array
       const match = text.match(/\[[\s\S]*\]/);
       if (match) blocks = JSON.parse(match[0]);
       else throw new Error('Could not parse schedule JSON from response.');
     }
 
     renderSchedule(blocks);
-  } catch (err) {
+  } catch(e) {
     output.innerHTML = `
       <div style="border:1px solid var(--red);padding:1rem;font-family:var(--font-mono);font-size:0.7rem;color:var(--red);">
-        Error: ${escapeHtml(err.message)}
+        Error: ${escapeHtml(e.message)}
       </div>`;
-    showToast('Failed to generate schedule. Check your API key.');
+    showToast('Failed to generate schedule.');
   } finally {
     btn.disabled = false;
     btn.textContent = '◈   Rebuild My Day';
   }
 }
 
-// ── Schedule state ─────────────────────────────────────────────────────────
+// ── DRAG-AND-DROP SCHEDULE ─────────────────────────────────────────────────
 let currentSchedule = [];
-let dragSrcIndex = null;
+let dragSrcIndex    = null;
 
 const typeLabels = {
   focus: 'Deep Focus', break: 'Break', personal: 'Personal',
   admin: 'Admin', meeting: 'Meeting'
 };
 
-// ── Time / duration parsing ────────────────────────────────────────────────
 function parseTimeToMinutes(timeStr) {
   if (!timeStr) return 0;
   const m = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -1801,42 +1730,35 @@ function parseTimeToMinutes(timeStr) {
 
 function minutesToTimeStr(totalMins) {
   totalMins = ((totalMins % 1440) + 1440) % 1440;
-  const h24 = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
+  const h24 = Math.floor(totalMins / 60), m = totalMins % 60;
   const ampm = h24 < 12 ? 'AM' : 'PM';
-  let h = h24 % 12;
-  if (h === 0) h = 12;
+  let h = h24 % 12; if (h === 0) h = 12;
   return `${h}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
 function parseDurationToMinutes(durStr) {
   if (!durStr) return 30;
   let total = 0;
-  const hrMatch = durStr.match(/(\d+(?:\.\d+)?)\s*h(?:r|rs|our|ours)?/i);
+  const hrMatch  = durStr.match(/(\d+(?:\.\d+)?)\s*h(?:r|rs|our|ours)?/i);
   const minMatch = durStr.match(/(\d+)\s*m(?:in|ins|inute|inutes)?/i);
-  if (hrMatch) total += Math.round(parseFloat(hrMatch[1]) * 60);
+  if (hrMatch)  total += Math.round(parseFloat(hrMatch[1]) * 60);
   if (minMatch) total += parseInt(minMatch[1]);
   return total || 30;
 }
 
-// ── Recalculate times after reorder ───────────────────────────────────────
 function recalcTimes() {
   if (!currentSchedule.length) return;
   let cursor = parseTimeToMinutes(currentSchedule[0].time);
   if (cursor === 0) cursor = parseTimeToMinutes('9:00 AM');
-  currentSchedule.forEach((b, i) => {
+  currentSchedule.forEach(b => {
     b.time = minutesToTimeStr(cursor);
-    const dur = parseDurationToMinutes(b.duration);
-    cursor += dur;
+    cursor += parseDurationToMinutes(b.duration);
   });
 }
 
-// ── Drag-and-drop handlers ────────────────────────────────────────────────
 function onDragStart(e, idx) {
   dragSrcIndex = idx;
   e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', idx);
-  // Slight delay so the dragging class applies after the browser snapshots the element
   setTimeout(() => {
     const el = document.querySelector(`[data-block-idx="${idx}"]`);
     if (el) el.classList.add('dragging');
@@ -1844,9 +1766,8 @@ function onDragStart(e, idx) {
 }
 
 function onDragEnd(e, idx) {
-  document.querySelectorAll('.schedule-block').forEach(el => {
-    el.classList.remove('dragging', 'drag-over');
-  });
+  document.querySelectorAll('.schedule-block').forEach(el =>
+    el.classList.remove('dragging', 'drag-over'));
 }
 
 function onDragOver(e, idx) {
@@ -1865,15 +1786,13 @@ function onDragLeave(e, idx) {
 function onDrop(e, targetIdx) {
   e.preventDefault();
   if (dragSrcIndex === null || dragSrcIndex === targetIdx) return;
-  // Reorder
   const moved = currentSchedule.splice(dragSrcIndex, 1)[0];
   currentSchedule.splice(targetIdx, 0, moved);
   recalcTimes();
-  renderScheduleBlocks(false); // no intro animation on reorder
+  renderScheduleBlocks(false);
   dragSrcIndex = null;
 }
 
-// ── Render ─────────────────────────────────────────────────────────────────
 function renderSchedule(blocks) {
   currentSchedule = blocks.map(b => ({ ...b }));
   renderScheduleBlocks(true);
@@ -1889,7 +1808,6 @@ function renderScheduleBlocks(animate) {
     el.setAttribute('draggable', 'true');
     el.setAttribute('data-block-idx', i);
     if (animate) el.style.animationDelay = `${i * 60}ms`;
-
     el.innerHTML = `
       <div class="drag-handle" title="Drag to reorder">⠿</div>
       <div class="block-time">${escapeHtml(b.time || '')}${b.duration ? ' · ' + escapeHtml(b.duration) : ''}</div>
@@ -1899,34 +1817,26 @@ function renderScheduleBlocks(animate) {
         <span class="block-tag">${typeLabels[b.type] || b.type || 'Task'}</span>
         ${b.goal_ref ? `<span style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);margin-top:0.4rem;">↳ ${escapeHtml(b.goal_ref)}</span>` : ''}
       </div>`;
-
     el.addEventListener('dragstart', e => onDragStart(e, i));
     el.addEventListener('dragend',   e => onDragEnd(e, i));
     el.addEventListener('dragover',  e => onDragOver(e, i));
     el.addEventListener('dragleave', e => onDragLeave(e, i));
     el.addEventListener('drop',      e => onDrop(e, i));
-
-    // Prevent drag when clicking the content (only drag handle triggers it)
     const handle = el.querySelector('.drag-handle');
     el.addEventListener('mousedown', e => {
       if (!e.target.closest('.drag-handle')) el.setAttribute('draggable', 'false');
     });
     el.addEventListener('mouseup', () => el.setAttribute('draggable', 'true'));
     handle.addEventListener('mousedown', () => el.setAttribute('draggable', 'true'));
-
     output.appendChild(el);
   });
 }
 
-// ──────────────────────────────────────────────
-// UTILITIES
-// ──────────────────────────────────────────────
+// ── UTILITIES ──────────────────────────────────────────────────────────────
 function escapeHtml(str) {
   return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 let toastTimer;
@@ -1934,18 +1844,14 @@ function showToast(msg) {
   const existing = document.querySelector('.toast');
   if (existing) existing.remove();
   clearTimeout(toastTimer);
-
   const el = document.createElement('div');
   el.className = 'toast';
   el.textContent = msg;
   document.body.appendChild(el);
-
   toastTimer = setTimeout(() => el.remove(), 3500);
 }
 
-// ──────────────────────────────────────────────
-// START
-// ──────────────────────────────────────────────
+// ── START ──────────────────────────────────────────────────────────────────
 init();
 </script>
 </body>
