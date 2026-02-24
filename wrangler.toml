@@ -9,7 +9,7 @@ compatibility_date = "2024-01-01"
 [[d1_databases]]
 binding       = "DB"
 database_name = "meridian-db"
-database_id   = "YOUR_DATABASE_ID"
+database_id   = "7d31e45f-4109-4d39-8106-7a3b9a334449"
 
 # Secrets — set via Cloudflare dashboard or:
 #   npx wrangler secret put GCAL_CLIENT_ID
