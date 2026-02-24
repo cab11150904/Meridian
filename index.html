@@ -91,6 +91,20 @@
   --red:#8b2040;--text:#1a1830;--text-dim:#8080b0;
 }
 
+/* ── CLASSIFIED THEMES (MARPAT) — unlocked via Easter egg ── */
+[data-theme="desert"] {
+  --bg:#c8a464;--surface:#b89050;--surface2:#a87c3c;--border:#8a6028;
+  --amber:#2c1a08;--amber-light:#3c2810;--amber-dim:#6a4820;
+  --cream:#1a0e04;--cream-dim:#5a3c18;--teal:#3c2808;--teal-light:#4e3810;
+  --red:#8b2020;--text:#1e1006;--text-dim:#7a5c30;
+}
+[data-theme="woodland"] {
+  --bg:#2a3818;--surface:#222e12;--surface2:#1c280e;--border:#16200a;
+  --amber:#8aaa2a;--amber-light:#aace40;--amber-dim:#4a6a10;
+  --cream:#d0d8a0;--cream-dim:#788850;--teal:#5a7820;--teal-light:#7a9a30;
+  --red:#a03020;--text:#ccd898;--text-dim:#607040;
+}
+
 .theme-swatches {
   display:grid;grid-template-columns:repeat(5,1fr);gap:0.5rem;
   margin-top:0.5rem;margin-bottom:0.6rem;
@@ -1125,6 +1139,14 @@
       <div class="theme-swatch-col"><div class="theme-swatch light-theme" id="swatch-haze"      onclick="selectTheme('haze')"      style="background:linear-gradient(135deg,#f3f4f8 50%,#2d2a6e 50%);"></div><div class="theme-swatch-label">Haze</div></div>
     </div>
     <div style="height:1px;background:var(--border);margin-bottom:1.25rem;"></div>
+    <div id="classified-swatches" style="display:none;margin-bottom:1.25rem;">
+      <div style="font-family:var(--font-mono);font-size:0.55rem;letter-spacing:0.15em;color:var(--text-dim);text-transform:uppercase;margin-bottom:0.5rem;display:flex;align-items:center;gap:0.5rem;"><span style="color:var(--amber);">&#9733;</span> Classified</div>
+      <div class="theme-swatches" style="grid-template-columns:repeat(2,1fr);margin-bottom:0;">
+        <div class="theme-swatch-col"><div class="theme-swatch" id="swatch-desert"   onclick="selectTheme('desert')"   style="background:linear-gradient(135deg,#c8a464 50%,#2c1a08 50%);"></div><div class="theme-swatch-label">Desert</div></div>
+        <div class="theme-swatch-col"><div class="theme-swatch" id="swatch-woodland" onclick="selectTheme('woodland')" style="background:linear-gradient(135deg,#2a3818 50%,#8aaa2a 50%);"></div><div class="theme-swatch-label">Woodland</div></div>
+      </div>
+      <div style="height:1px;background:var(--border);margin-top:1.25rem;"></div>
+    </div>
     <label>Your Name</label>
     <input type="text" id="s-name" />
     <label>Role / Context</label>
@@ -1303,6 +1325,7 @@ function openSettings() {
   document.getElementById('settings-email').textContent = userEmail;
   // Refresh active swatch
   applyTheme(state.theme || localStorage.getItem('m_theme') || 'meridian');
+  renderClassifiedSwatches();
   document.getElementById('settings-modal').classList.add('open');
 }
 function closeSettings() {
@@ -1803,19 +1826,62 @@ function showToast(msg) {
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 var THEMES = ['meridian','obsidian','dusk','slate','ember','parchment','arctic','sage','dawnfire','haze'];
+var CLASSIFIED_THEMES = ['desert','woodland'];
+
+// ── Easter egg — MARPAT unlock ───────────────────────────────────────────────
+var logoClickCount  = 0;
+var logoClickTimer  = null;
+var classifiedUnlocked = localStorage.getItem('m_classified') === '1';
+
+function onLogoClick() {
+  logoClickCount++;
+  clearTimeout(logoClickTimer);
+  logoClickTimer = setTimeout(function() { logoClickCount = 0; }, 1200);
+  if (logoClickCount >= 5) {
+    logoClickCount = 0;
+    if (!classifiedUnlocked) {
+      classifiedUnlocked = true;
+      localStorage.setItem('m_classified', '1');
+      showToast('🎖 Classified themes unlocked.');
+    }
+    // Re-render swatches if settings modal is open
+    renderClassifiedSwatches();
+  }
+}
+
+function renderClassifiedSwatches() {
+  var container = document.getElementById('classified-swatches');
+  if (!container) return;
+  if (classifiedUnlocked) {
+    container.style.display = '';
+  } else {
+    container.style.display = 'none';
+  }
+  // Update active state
+  var currentTheme = state.theme || localStorage.getItem('m_theme') || 'meridian';
+  CLASSIFIED_THEMES.forEach(function(t) {
+    var sw = document.getElementById('swatch-' + t);
+    if (sw) {
+      if (t === currentTheme) sw.classList.add('active');
+      else sw.classList.remove('active');
+    }
+  });
+}
 
 function applyTheme(theme) {
-  if (!theme || THEMES.indexOf(theme) === -1) theme = 'meridian';
+  var allThemes = THEMES.concat(CLASSIFIED_THEMES);
+  if (!theme || allThemes.indexOf(theme) === -1) theme = 'meridian';
   document.documentElement.setAttribute('data-theme', theme);
   state.theme = theme;
   // Update swatch active states
-  THEMES.forEach(function(t) {
+  THEMES.concat(CLASSIFIED_THEMES).forEach(function(t) {
     var sw = document.getElementById('swatch-' + t);
     if (sw) {
       if (t === theme) sw.classList.add('active');
       else sw.classList.remove('active');
     }
   });
+  renderClassifiedSwatches();
 }
 
 function selectTheme(theme) {
@@ -1833,8 +1899,9 @@ function selectTheme(theme) {
 }
 
 function loadThemeEarly() {
-  // Apply theme from localStorage before anything else renders
   var saved = localStorage.getItem('m_theme') || 'meridian';
+  var allThemes = ['meridian','obsidian','dusk','slate','ember','parchment','arctic','sage','dawnfire','haze','desert','woodland'];
+  if (allThemes.indexOf(saved) === -1) saved = 'meridian';
   document.documentElement.setAttribute('data-theme', saved);
 }
 
