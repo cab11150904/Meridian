@@ -1662,7 +1662,7 @@ async function saveSettings() {
 
 // ── Goals ─────────────────────────────────────────────────────────────────────
 async function addGoal(type) {
-  var inputId = type === 'work' ? 'new-work-goal' : 'new-personal-goal';
+  var inputId = type === 'work' ? 'new-work-goal' : type === 'note' ? 'new-note' : 'new-personal-goal';
   var input = document.getElementById(inputId);
   var text = input.value.trim();
   if (!text) return;
