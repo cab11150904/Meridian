@@ -195,6 +195,7 @@ export async function onRequest(context) {
     if (method === 'POST') {
       const body = await request.json();
       if (!body.text || !body.type) return err('text and type are required');
+      if (!['work', 'personal', 'note'].includes(body.type)) return err('Invalid type');
       const encText = await encrypt(body.text.trim(), cryptoKey);
       const result  = await db
         .prepare('INSERT INTO goals (user_id, text, type) VALUES (?, ?, ?)')
@@ -218,6 +219,17 @@ export async function onRequest(context) {
       await db.prepare(
         'UPDATE goals SET completed = 1, completed_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?'
       ).bind(id, userId).run();
+      return json({ ok: true });
+    }
+
+    // PATCH /api/goals/:id/type — move between work / personal / note
+    if (method === 'PATCH' && parts[2] === 'type') {
+      const body = await request.json();
+      const newType = body.type;
+      if (!['work', 'personal', 'note'].includes(newType)) return err('Invalid type');
+      await db.prepare(
+        'UPDATE goals SET type = ? WHERE id = ? AND user_id = ?'
+      ).bind(newType, id, userId).run();
       return json({ ok: true });
     }
   }
