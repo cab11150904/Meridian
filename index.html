@@ -1163,16 +1163,30 @@
       min-height: auto;
     }
     .header {
-      padding: 0.75rem 1rem;
+      padding: 0.6rem 1rem;
+      flex-wrap: wrap;
+      gap: 0.25rem;
     }
     .header-left {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.2rem;
+      flex: 1;
+      align-items: baseline;
+      gap: 0.6rem;
     }
-    .logo { font-size: 1.25rem; }
-    .date-pill { font-size: 0.5rem; padding: 0.2rem 0.5rem; }
-    .header-right button { font-size: 0.6rem; padding: 0.3rem 0.6rem; }
+    .logo { font-size: 1.2rem; }
+    .date-pill {
+      font-size: 0.48rem;
+      padding: 0.15rem 0.4rem;
+      letter-spacing: 0.08em;
+      white-space: nowrap;
+    }
+    .header-right {
+      flex-shrink: 0;
+    }
+    .header-right button {
+      font-size: 0.58rem;
+      padding: 0.3rem 0.55rem;
+      letter-spacing: 0.1em;
+    }
   }
 
   .toast {

@@ -1,5 +1,5 @@
 // Meridian Service Worker
-const CACHE_NAME    = 'meridian-v1';
+const CACHE_NAME    = 'meridian-v2';
 const OFFLINE_URL   = '/';
 
 // Assets to pre-cache on install
