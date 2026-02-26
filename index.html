@@ -1467,9 +1467,39 @@ var state = {
 };
 
 // ── API helper ───────────────────────────────────────────────────────────────
+// Silent token refresh — resolves when a fresh token is available
+var _tokenRefreshPromise = null;
+function refreshIdToken() {
+  if (_tokenRefreshPromise) return _tokenRefreshPromise;
+  _tokenRefreshPromise = new Promise(function(resolve, reject) {
+    var timeout = setTimeout(function() {
+      _tokenRefreshPromise = null;
+      reject(new Error('Token refresh timed out'));
+    }, 8000);
+    google.accounts.id.prompt(function(notification) {
+      // prompt fires the callback set in initialize() — we just wait
+    });
+    // Poll for token — GSI calls onGoogleSignIn which sets idToken
+    var poll = setInterval(function() {
+      if (idToken) {
+        clearInterval(poll);
+        clearTimeout(timeout);
+        _tokenRefreshPromise = null;
+        resolve(idToken);
+      }
+    }, 100);
+  });
+  return _tokenRefreshPromise;
+}
+
 async function api(path, method, body) {
   method = method || 'GET';
-  if (!idToken) throw new Error('Not authenticated');
+  if (!idToken) {
+    try { await refreshIdToken(); } catch(e) {
+      showSetupScreen('Session expired. Please sign in again.');
+      throw new Error('Not authenticated');
+    }
+  }
   var opts = {
     method: method,
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken }
