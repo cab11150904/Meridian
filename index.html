@@ -2,8 +2,15 @@
 <html lang="en" data-theme="meridian">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Meridian — Daily Intelligence Assistant</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0c0e14" id="theme-color-meta">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Meridian">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=IBM+Plex+Mono:wght@300;400;500&family=Crimson+Pro:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
@@ -2420,9 +2427,18 @@ function renderClassifiedSwatches() {
   });
 }
 
+// Theme background colors for meta theme-color
+var THEME_BG_COLORS = {
+  meridian:'#0c0e14', obsidian:'#090b09', dusk:'#0d0b14', slate:'#0a0e14', ember:'#120d09',
+  parchment:'#f5f0e8', arctic:'#f4f7fa', sage:'#f2f4f0', dawnfire:'#faf5f0', haze:'#f3f4f8',
+  desert:'#c8a464', woodland:'#2a3818'
+};
+
 function applyTheme(theme) {
   var allThemes = THEMES.concat(CLASSIFIED_THEMES);
   if (!theme || allThemes.indexOf(theme) === -1) theme = 'meridian';
+  var metaTheme = document.getElementById('theme-color-meta');
+  if (metaTheme) metaTheme.setAttribute('content', THEME_BG_COLORS[theme] || '#0c0e14');
   document.documentElement.setAttribute('data-theme', theme);
   state.theme = theme;
   // Update swatch active states
@@ -2463,6 +2479,18 @@ loadThemeEarly();
 // ── Start ──────────────────────────────────────────────────────────────────────
 init();
 </script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js').then(function(reg) {
+      console.log('Meridian SW registered:', reg.scope);
+    }).catch(function(err) {
+      console.log('SW registration failed:', err);
+    });
+  });
+}
+</script>
+
 <div style="position:fixed;bottom:0.75rem;right:1rem;z-index:150;">
   <a href="https://meridianplanner.com/privacypolicy.html" target="_blank"
     style="font-family:var(--font-mono);font-size:0.55rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-dim);text-decoration:none;opacity:0.5;transition:opacity 0.2s;"
