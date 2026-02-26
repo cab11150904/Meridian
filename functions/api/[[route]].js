@@ -222,8 +222,8 @@ export async function onRequest(context) {
       return json({ ok: true });
     }
 
-    // PATCH /api/goals/:id/type — move between work / personal / note
-    if (method === 'PATCH' && parts[2] === 'type') {
+    // POST /api/goals/:id/move — move between work / personal / note
+    if (method === 'POST' && parts[2] === 'move') {
       const body = await request.json();
       const newType = body.type;
       if (!['work', 'personal', 'note'].includes(newType)) return err('Invalid type');
