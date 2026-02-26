@@ -596,39 +596,57 @@
   /* Search bar */
   .search-bar {
     display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    padding: 0.5rem 1rem;
+    flex-direction: column;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
     z-index: 50;
   }
+  .search-input-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+  }
   .search-bar input {
     flex: 1;
     background: var(--surface2);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 0.4rem 0.75rem;
+    padding: 0.45rem 0.75rem;
     font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     outline: none;
     min-width: 0;
   }
   .search-bar input:focus { border-color: var(--amber-dim); }
-  .search-bar select {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    padding: 0.4rem 0.5rem;
+  .search-scope-row {
+    display: flex;
+    align-items: center;
+    border-top: 1px solid var(--border);
+  }
+  .search-scope-row label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
     font-family: var(--font-mono);
     font-size: 0.6rem;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
     cursor: pointer;
-    outline: none;
-    white-space: nowrap;
+    padding: 0.4rem 1rem;
+    border-right: 1px solid var(--border);
+    transition: color 0.15s;
+    user-select: none;
+    flex: 1;
+    justify-content: center;
   }
+  .search-scope-row label:last-child { border-right: none; }
+  .search-scope-row label:hover { color: var(--text); }
+  .search-scope-row input[type="radio"] { display: none; }
+  .search-scope-row label.active { color: var(--amber); }
   .search-bar .search-clear {
     background: none;
     border: none;
@@ -637,6 +655,7 @@
     font-size: 0.8rem;
     padding: 0 0.25rem;
     line-height: 1;
+    flex-shrink: 0;
   }
   .search-bar .search-clear:hover { color: var(--text); }
 
@@ -1213,14 +1232,16 @@
 
   <!-- Search bar -->
   <div class="search-bar" id="search-bar">
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-dim);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <input type="text" id="search-input" placeholder="Search goals and events..." oninput="onSearchInput()" />
-    <select id="search-scope" onchange="onSearchInput()" title="Search scope">
-      <option value="open">Open</option>
-      <option value="closed">Closed</option>
-      <option value="all">All</option>
-    </select>
-    <button class="search-clear" id="search-clear" onclick="clearSearch()" style="display:none;">&#x2715;</button>
+    <div class="search-input-row">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-dim);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="search-input" placeholder="Search goals and events..." oninput="onSearchInput()" />
+      <button class="search-clear" id="search-clear" onclick="clearSearch()" style="display:none;">&#x2715;</button>
+    </div>
+    <div class="search-scope-row">
+      <label id="scope-open" class="active" onclick="setScope('open')"><input type="radio" name="scope" value="open" checked />Open</label>
+      <label id="scope-closed" onclick="setScope('closed')"><input type="radio" name="scope" value="closed" />Closed</label>
+      <label id="scope-all" onclick="setScope('all')"><input type="radio" name="scope" value="all" />All</label>
+    </div>
   </div>
 
   <!-- Search results -->
@@ -2143,6 +2164,16 @@ function renderScheduleBlocks(animate) {
 
 // ── Search ────────────────────────────────────────────────────────────────────
 var searchDebounce = null;
+window._searchScope = 'open';
+
+function setScope(scope) {
+  window._searchScope = scope;
+  ['open','closed','all'].forEach(function(s) {
+    var el = document.getElementById('scope-' + s);
+    if (el) el.classList.toggle('active', s === scope);
+  });
+  onSearchInput();
+}
 var pastEvents     = null; // loaded lazily when 'closed' or 'all' selected
 
 function onSearchInput() {
@@ -2161,7 +2192,7 @@ function clearSearch() {
 
 async function runSearch() {
   var q     = document.getElementById('search-input').value.trim().toLowerCase();
-  var scope = document.getElementById('search-scope').value;
+  var scope = window._searchScope || 'open';
   var panel = document.getElementById('search-results-panel');
 
   if (!q) { panel.classList.remove('visible'); panel.innerHTML = ''; return; }
